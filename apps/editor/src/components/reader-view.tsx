@@ -5,14 +5,14 @@ import { orderFlow, summarize } from "../lib/order-flow.ts";
 import { useFlow } from "../flow/flow-context.tsx";
 
 export function ReaderView() {
-  const { nodes, edges, selectedId, setSelectedId } = useFlow();
+  const { nodes, edges, selectedId, setSelectedId, activeFlow } = useFlow();
   const { order, back, byId } = useMemo(() => orderFlow(nodes, edges), [nodes, edges]);
 
   return (
     <div className="h-full overflow-y-auto bg-canvas-bg">
       <div className="mx-auto max-w-2xl px-6 py-8">
         <div className="mb-6">
-          <div className="text-lg font-semibold tracking-tight">Flow</div>
+          <div className="text-lg font-semibold tracking-tight">{activeFlow.name}</div>
           <div className="text-[13px] text-muted-foreground">
             {nodes.length} steps · read top to bottom · {back.size} loop-back
             {back.size === 1 ? "" : "s"}

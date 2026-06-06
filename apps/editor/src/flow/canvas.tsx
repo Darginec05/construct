@@ -75,8 +75,9 @@ function CanvasInner() {
 }
 
 export function Canvas() {
+  const { activeFlowId } = useFlow();
   return (
-    <ReactFlowProvider>
+    <ReactFlowProvider key={activeFlowId}>
       <CanvasInner />
     </ReactFlowProvider>
   );

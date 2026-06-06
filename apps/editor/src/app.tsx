@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Inspector } from "./components/inspector.tsx";
-import { NodeLibrary } from "./components/node-library.tsx";
+import { LeftDock } from "./components/left-dock.tsx";
 import { ReaderView } from "./components/reader-view.tsx";
 import { TopBar, type ViewMode } from "./components/top-bar.tsx";
 import { Canvas } from "./flow/canvas.tsx";
@@ -13,10 +13,8 @@ export function App() {
     <FlowProvider>
       <div className="grid h-full grid-rows-[52px_1fr]">
         <TopBar view={view} onViewChange={setView} />
-        <div className="grid grid-cols-[286px_1fr_380px] overflow-hidden">
-          <aside className="border-r border-border bg-card">
-            <NodeLibrary />
-          </aside>
+        <div className="grid grid-cols-[auto_1fr_380px] overflow-hidden">
+          <LeftDock />
           <main className="overflow-hidden bg-canvas-bg">
             {view === "canvas" ? <Canvas /> : <ReaderView />}
           </main>
