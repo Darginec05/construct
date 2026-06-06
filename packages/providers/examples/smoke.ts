@@ -4,9 +4,14 @@ import {
   buildParams as buildOpenAIParams,
   fromCompletion,
 } from "../dist/openai.js";
+import {
+  buildParams as buildGeminiParams,
+  fromResponse,
+} from "../dist/gemini.js";
+import { createFakeProvider } from "../dist/fake.js";
 import type { ChatMessage } from "../dist/index.js";
 
-function main(): void {
+async function main(): Promise<void> {
   // buildParams: a prompt with an advertised tool.
   const p1 = buildParams(
     [
@@ -148,10 +153,147 @@ function main(): void {
   assert.equal(oResult.stopReason, "tool_calls");
   assert.deepEqual(oResult.usage, { inputTokens: 10, outputTokens: 5 });
 
+  // --- Gemini -------------------------------------------------------------
+
+  // buildParams: system hoists to systemInstruction; assistant role is "model".
+  const g1 = buildGeminiParams(
+    [
+      { role: "system", content: "be terse" },
+      { role: "user", content: "look up 7" },
+    ],
+    {
+      model: "gemini-2.0-flash",
+      temperature: 0.2,
+      tools: [
+        {
+          name: "lookup",
+          description: "Look up a record",
+          parameters: { type: "object", properties: { id: { type: "number" } } },
+        },
+      ],
+      toolChoice: "required",
+    },
+    1024,
+  );
+  assert.equal(g1.config!.systemInstruction, "be terse", "system → systemInstruction");
+  assert.equal(g1.config!.maxOutputTokens, 1024, "default max_tokens → maxOutputTokens");
+  assert.equal(g1.config!.temperature, 0.2);
+  assert.equal(
+    (g1.config!.tools as any)[0].functionDeclarations[0].name,
+    "lookup",
+    "tool mapped to functionDeclaration",
+  );
+  assert.equal(
+    (g1.config!.toolConfig as any).functionCallingConfig.mode,
+    "ANY",
+    "required → ANY mode",
+  );
+  assert.deepEqual(
+    g1.contents,
+    [{ role: "user", parts: [{ text: "look up 7" }] }],
+    "system stripped from contents",
+  );
+
+  // buildParams: a tool round-trip recovers the function name and groups results.
+  const g2 = buildGeminiParams(convo, { model: "m", maxTokens: 256 }, 1024);
+  assert.equal(g2.config!.maxOutputTokens, 256, "explicit maxTokens wins over default");
+  const gContents = g2.contents as any[];
+  assert.equal(gContents[1].role, "model", "assistant role renamed to model");
+  assert.equal(gContents[1].parts[0].text, "let me check");
+  assert.equal(gContents[1].parts[1].functionCall.name, "lookup");
+  const gToolTurn = gContents[2];
+  assert.equal(gToolTurn.role, "user", "tool results land in a user turn");
+  assert.equal(gToolTurn.parts.length, 2, "adjacent tool results grouped");
+  assert.equal(
+    gToolTurn.parts[0].functionResponse.name,
+    "lookup",
+    "function name recovered from the preceding model turn",
+  );
+  assert.deepEqual(
+    gToolTurn.parts[0].functionResponse.response,
+    { output: "record#7" },
+    "non-JSON tool result wrapped under output",
+  );
+
+  // fromResponse: assemble text, tool calls, finish reason, and usage.
+  const gResult = fromResponse({
+    candidates: [
+      {
+        content: {
+          role: "model",
+          parts: [
+            { text: "hi" },
+            { functionCall: { name: "lookup", args: { id: 7 } } },
+          ],
+        },
+        finishReason: "STOP",
+      },
+    ],
+    usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+  } as Parameters<typeof fromResponse>[0]);
+  assert.equal(gResult.text, "hi");
+  assert.equal(gResult.toolCalls!.length, 1);
+  assert.equal(gResult.toolCalls![0]!.id, "call_0", "synthesized stable id when omitted");
+  assert.equal(gResult.toolCalls![0]!.name, "lookup");
+  assert.deepEqual(gResult.toolCalls![0]!.arguments, { id: 7 });
+  assert.equal(gResult.stopReason, "STOP");
+  assert.deepEqual(gResult.usage, { inputTokens: 10, outputTokens: 5 });
+
+  // --- Fake (offline, for integration tests) ------------------------------
+
+  // A scripted two-turn tool loop: first reply asks for a tool, second answers.
+  const fake = createFakeProvider({
+    id: "fake",
+    script: [
+      {
+        text: "",
+        toolCalls: [{ id: "c1", name: "lookup", arguments: { id: 7 } }],
+        stopReason: "tool_use",
+      },
+      // Function step: assert the tool result was fed back, then answer.
+      (msgs) => {
+        const toolMsg = msgs[msgs.length - 1]!;
+        assert.equal(toolMsg.role, "tool", "tool result fed back on turn 2");
+        return { text: "the answer is 42", stopReason: "end_turn" };
+      },
+    ],
+  });
+
+  const turn1 = await fake.chat([{ role: "user", content: "look up 7" }], {});
+  assert.deepEqual(turn1.toolCalls, [
+    { id: "c1", name: "lookup", arguments: { id: 7 } },
+  ]);
+  const turn2 = await fake.chat(
+    [
+      { role: "user", content: "look up 7" },
+      { role: "assistant", content: "", toolCalls: turn1.toolCalls },
+      { role: "tool", toolCallId: "c1", content: "record#7" },
+    ],
+    {},
+  );
+  assert.equal(turn2.text, "the answer is 42");
+  assert.equal(fake.calls.length, 2, "every call recorded");
+  assert.equal(fake.cursor, 2, "both script steps consumed");
+
+  // Exhausted script echoes the last user message; onDelta still fires.
+  let streamed = "";
+  const echo = await fake.chat([{ role: "user", content: "ping" }], {
+    onDelta: (t) => {
+      streamed += t;
+    },
+  });
+  assert.equal(echo.text, "ping", "echoes last user message past the script");
+  assert.equal(streamed, "ping", "onDelta forwarded the reply");
+
   console.log("providers smoke: all assertions passed");
   console.log("  params ->", JSON.stringify({ system: p1.system, tool_choice: p1.tool_choice }));
   console.log("  result ->", JSON.stringify(result));
   console.log("  openai ->", JSON.stringify(oResult));
+  console.log("  gemini ->", JSON.stringify(gResult));
+  console.log("  fake ->", JSON.stringify(turn2));
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

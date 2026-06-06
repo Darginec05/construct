@@ -69,3 +69,11 @@ export function listProviders(): ModelProvider[] {
 
 export { createAnthropicProvider, type AnthropicOptions } from "./anthropic.js";
 export { createOpenAIProvider, type OpenAIOptions } from "./openai.js";
+export { createGeminiProvider, type GeminiOptions } from "./gemini.js";
+export {
+  createFakeProvider,
+  type FakeOptions,
+  type FakeProvider,
+  type FakeCall,
+  type ScriptStep,
+} from "./fake.js";
