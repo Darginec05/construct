@@ -16,6 +16,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
     "stress": "tsc -p tsconfig.json && tsc -p tsconfig.examples.json && node examples-dist/stress.js",
     "clean": "rm -rf dist examples-dist .turbo"
   },
@@ -23,6 +24,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
   }
 }

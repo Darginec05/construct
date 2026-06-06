@@ -1,29 +1,168 @@
-import type { RunState } from "@construct/engine";
+import {
+  registerExecutor,
+  type ExecutorContext,
+  type ExecutorResult,
+} from "@construct/engine";
+import {
+  getProvider,
+  type ChatMessage,
+  type ToolSpec,
+} from "@construct/providers";
+import { getTool } from "@construct/tools";
 
-export interface NodeContext<Config = Record<string, unknown>> {
-  config: Config;
-  state: RunState;
+/**
+ * Built-in leaf-node executors. These are the node types that need external
+ * dependencies (models, tools), so they live here rather than in the engine,
+ * which stays a dependency-free runtime. Importing this package registers them;
+ * `registerBuiltinNodes()` is also exported for explicit/idempotent wiring.
+ */
+
+interface ModelRef {
+  provider: string;
+  model: string;
+  temperature?: number;
 }
 
-/** A node implementation. Returns a partial state patch merged back into the run. */
-export interface NodeDefinition<Config = Record<string, unknown>> {
-  type: string;
-  execute(ctx: NodeContext<Config>): Promise<Partial<RunState>>;
+function patch(writeTo: unknown, value: unknown): ExecutorResult {
+  return typeof writeTo === "string" ? { patch: { [writeTo]: value } } : {};
 }
 
-const registry = new Map<string, NodeDefinition>();
-
-export function registerNode(definition: NodeDefinition): void {
-  registry.set(definition.type, definition);
+function requireProvider(model: ModelRef | undefined, node: string) {
+  if (!model) throw new Error(`${node} node: missing "model"`);
+  const provider = getProvider(model.provider);
+  if (!provider) throw new Error(`${node} node: no provider "${model.provider}"`);
+  return provider;
 }
 
-export function getNode(type: string): NodeDefinition | undefined {
-  return registry.get(type);
+/** Structured output: try to parse JSON when a schema was requested. */
+function parseOutput(output: unknown, text: string): unknown {
+  if (output && typeof output === "object" && "schema" in output) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { raw: text };
+    }
+  }
+  return text;
 }
 
-export function listNodes(): NodeDefinition[] {
-  return [...registry.values()];
+/** Resolve a node's declared tool names into specs to advertise to the model. */
+function resolveTools(names: string[]): ToolSpec[] {
+  return names.map((name) => {
+    const impl = getTool(name);
+    if (!impl) throw new Error(`agent node: no tool registered as "${name}"`);
+    return {
+      name: impl.name,
+      description: impl.description,
+      parameters: impl.parameters ?? { type: "object", properties: {} },
+    };
+  });
 }
 
-// Built-in node types planned: llm, agent, supervisor, tool, router, loop,
-// code, http, rag-retrieve, human-in-loop, sub-agent.
+/**
+ * `agent`: a model call that runs a multi-step tool-use loop. Each turn the
+ * model may either answer (text, loop ends) or request tool calls, which we
+ * execute and feed back as `tool` messages for the next turn. The loop is
+ * bounded by `maxSteps`; `toolChoice: "none"` collapses it to one completion.
+ */
+async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
+  const model = ctx.config.model as ModelRef | undefined;
+  const provider = requireProvider(model, "agent");
+  const toolNames = (ctx.config.tools as string[] | undefined) ?? [];
+  const toolChoice =
+    (ctx.config.toolChoice as "auto" | "required" | "none" | undefined) ??
+    "auto";
+  const tools = toolChoice === "none" ? [] : resolveTools(toolNames);
+  const maxSteps = Math.max(1, Number(ctx.config.maxSteps ?? 8));
+
+  const messages: ChatMessage[] = [];
+  if (typeof ctx.config.system === "string") {
+    messages.push({ role: "system", content: ctx.config.system });
+  }
+  const prompt = ctx.evaluate(ctx.config.prompt);
+  messages.push({ role: "user", content: prompt == null ? "" : String(prompt) });
+
+  let text = "";
+  for (let step = 0; step < maxSteps; step++) {
+    const res = await provider.chat(messages, {
+      model: model!.model,
+      temperature: model!.temperature,
+      tools: tools.length > 0 ? tools : undefined,
+      toolChoice: tools.length > 0 ? toolChoice : undefined,
+    });
+    text = res.text;
+    if (!res.toolCalls || res.toolCalls.length === 0) break;
+
+    messages.push({ role: "assistant", content: res.text, toolCalls: res.toolCalls });
+    for (const call of res.toolCalls) {
+      const impl = getTool(call.name);
+      if (!impl) {
+        throw new Error(`agent node: model called unknown tool "${call.name}"`);
+      }
+      const out = await impl.run(call.arguments);
+      messages.push({
+        role: "tool",
+        toolCallId: call.id,
+        content: typeof out === "string" ? out : JSON.stringify(out),
+      });
+    }
+  }
+  return patch(ctx.config.writeTo, parseOutput(ctx.config.output, text));
+}
+
+/**
+ * Pick the class the model named. Prefer a whole-word hit so "bill" doesn't
+ * swallow "billing"; fall back to substring, then to the longest class first so
+ * a more specific label wins over a prefix of it.
+ */
+function matchClass(text: string, classes: string[]): string | undefined {
+  const ranked = [...classes].sort((a, b) => b.length - a.length);
+  for (const c of ranked) {
+    const word = new RegExp(`\\b${c.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+    if (word.test(text)) return c;
+  }
+  return ranked.find((c) => text.includes(c.toLowerCase()));
+}
+
+/** `classifier`: forced choice among `classes`; the chosen class is the handle. */
+async function classifier(ctx: ExecutorContext): Promise<ExecutorResult> {
+  const model = ctx.config.model as ModelRef | undefined;
+  const provider = requireProvider(model, "classifier");
+  const classes = (ctx.config.classes as string[]) ?? [];
+  const prompt = ctx.evaluate(ctx.config.prompt);
+
+  const res = await provider.chat(
+    [
+      {
+        role: "system",
+        content: `Classify the input. Respond with exactly one of: ${classes.join(
+          ", ",
+        )}.`,
+      },
+      { role: "user", content: prompt == null ? "" : String(prompt) },
+    ],
+    { model: model!.model },
+  );
+  const text = res.text.trim().toLowerCase();
+
+  const chosen = matchClass(text, classes) ?? classes[0] ?? "out";
+  return { ...patch(ctx.config.writeTo, chosen), handle: chosen };
+}
+
+/** `tool`: invoke a registered tool with evaluated args. */
+async function tool(ctx: ExecutorContext): Promise<ExecutorResult> {
+  const name = ctx.config.tool as string;
+  const impl = getTool(name);
+  if (!impl) throw new Error(`tool node: no tool registered as "${name}"`);
+  const args = ctx.evaluate(ctx.config.args ?? {});
+  const result = await impl.run(args);
+  return patch(ctx.config.writeTo, result);
+}
+
+export function registerBuiltinNodes(): void {
+  registerExecutor("agent", agent);
+  registerExecutor("classifier", classifier);
+  registerExecutor("tool", tool);
+}
+
+registerBuiltinNodes();

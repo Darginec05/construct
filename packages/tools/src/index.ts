@@ -2,6 +2,8 @@
 export interface Tool<Input = unknown, Output = unknown> {
   name: string;
   description: string;
+  /** JSON Schema for `run`'s input, advertised to the model. Defaults to an open object. */
+  parameters?: Record<string, unknown>;
   run(input: Input): Promise<Output>;
 }
 
