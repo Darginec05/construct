@@ -1,0 +1,332 @@
+import { z } from "zod";
+import {
+  BudgetSchema,
+  ExprSchema,
+  DataTypeSchema,
+  ModelRefSchema,
+} from "./primitives.js";
+
+/**
+ * The built-in node catalog. The flow graph itself is open (a node `type` is
+ * just a string, so plugins can register their own), but every built-in type
+ * ships a typed config schema and a declared set of output handles. The copilot
+ * and editor target this catalog; `validateFlow` uses it to check each node's
+ * config and the edges leaving it.
+ */
+
+export const NodeCategorySchema = z.enum([
+  "io", // entry / exit
+  "model", // LLM calls and structured decisions
+  "control", // branching, loops, fan-out
+  "data", // deterministic transforms, retrieval
+  "tool", // invoke a registered tool (tiers + approval)
+  "human", // human-in-the-loop
+  "composite", // nested flows
+]);
+export type NodeCategory = z.infer<typeof NodeCategorySchema>;
+
+// --- io ---------------------------------------------------------------------
+
+/** Entry point. Declares the (multimodal) input contract: field -> data type. */
+const InputConfig = z.object({
+  schema: z.record(DataTypeSchema).default({}),
+});
+
+/** Terminal. Surfaces a value (channel ref or expression) as the run result. */
+const OutputConfig = z.object({
+  from: ExprSchema,
+});
+
+// --- model ------------------------------------------------------------------
+
+/**
+ * The workhorse: a model call that may run a multi-step tool-use loop. With
+ * `output: { schema }` it returns structured JSON; with tools + maxSteps it is
+ * a full agent loop. `model` is per-node so a flow can mix Haiku and Sonnet.
+ */
+const AgentConfig = z.object({
+  model: ModelRefSchema,
+  system: z.string().optional(),
+  prompt: ExprSchema.optional(),
+  tools: z.array(z.string()).default([]),
+  toolChoice: z.enum(["auto", "required", "none"]).default("auto"),
+  /** Cap on tool-use iterations before the loop is force-closed. */
+  maxSteps: z.number().int().positive().default(8),
+  output: z
+    .union([z.literal("text"), z.object({ schema: z.record(z.unknown()) })])
+    .default("text"),
+  budget: BudgetSchema.optional(),
+  writeTo: z.string().optional(),
+});
+
+/**
+ * A cheap, forced-structured-output decision node (the router pattern). Its
+ * `classes` become the output handles, so downstream edges branch on intent.
+ */
+const ClassifierConfig = z.object({
+  model: ModelRefSchema,
+  prompt: ExprSchema.optional(),
+  classes: z.array(z.string()).min(1),
+  writeTo: z.string().optional(),
+});
+
+// --- control ----------------------------------------------------------------
+
+/** Boolean split. Output handles: "true" / "false". */
+const BranchConfig = z.object({
+  condition: ExprSchema,
+});
+
+/** Multi-way split. Output handles: the cases plus "default". */
+const SwitchConfig = z.object({
+  on: ExprSchema,
+  cases: z.array(z.string()).min(1),
+});
+
+/**
+ * First-class loop with a hard stop. Runs a sub-flow body repeatedly until
+ * `until` is true or `maxIterations` / `budget` is exhausted. This is how the
+ * reflection / evaluator-optimizer pattern is expressed.
+ */
+const LoopConfig = z.object({
+  /** id of the sub-flow that forms the loop body. */
+  body: z.string(),
+  until: ExprSchema.optional(),
+  maxIterations: z.number().int().positive().default(5),
+  budget: BudgetSchema.optional(),
+  writeTo: z.string().optional(),
+});
+
+/**
+ * Fan-out over a collection. `aggregate: "merge"` combines partial results of
+ * one artifact; `"collect"` gathers competing candidates (variant fan-out).
+ */
+const MapConfig = z.object({
+  over: ExprSchema,
+  /** id of the sub-flow run per item. */
+  body: z.string(),
+  concurrency: z.number().int().positive().default(4),
+  aggregate: z.enum(["merge", "collect"]).default("collect"),
+  writeTo: z.string().optional(),
+});
+
+// --- data -------------------------------------------------------------------
+
+/** Deterministic function: a registered handler (`ref`) or inline source. */
+const CodeConfig = z
+  .object({
+    ref: z.string().optional(),
+    inline: z.string().optional(),
+    writeTo: z.string().optional(),
+  })
+  .refine((c) => Boolean(c.ref) || Boolean(c.inline), {
+    message: "code node requires either 'ref' or 'inline'",
+  });
+
+/** RAG retrieval from a vector store / knowledge source. */
+const RetrieveConfig = z.object({
+  store: z.string(),
+  query: ExprSchema,
+  topK: z.number().int().positive().default(5),
+  writeTo: z.string().optional(),
+});
+
+/** Pure expression evaluation (reshape / extract state). */
+const TransformConfig = z.object({
+  expr: ExprSchema,
+  writeTo: z.string().optional(),
+});
+
+// --- tool -------------------------------------------------------------------
+
+/**
+ * Invoke a registered tool. `tier` + `requiresApproval` encode the read vs
+ * write distinction: read/content auto-run; write/bulk/dangerous route through
+ * a human node first. `resource` binds the call to a declared resource session.
+ */
+const ToolConfig = z.object({
+  tool: z.string(),
+  args: z.record(ExprSchema).default({}),
+  tier: z.enum(["read", "content", "write", "bulk", "dangerous"]).optional(),
+  requiresApproval: z.boolean().default(false),
+  resource: z.string().optional(),
+  writeTo: z.string().optional(),
+});
+
+// --- human ------------------------------------------------------------------
+
+/**
+ * Durable pause for a human. Modes:
+ * - `approve`: confirm/reject a proposed change. Handles: "approved"/"rejected".
+ * - `select`: pick one of N candidates. Handle: "next".
+ * - `annotate`: leave feedback and continue. Handle: "next".
+ */
+const HumanConfig = z.object({
+  mode: z.enum(["approve", "select", "annotate"]),
+  prompt: z.string().optional(),
+  /** Time-to-live for the pending decision, in seconds. */
+  ttl: z.number().int().positive().optional(),
+  writeTo: z.string().optional(),
+});
+
+// --- composite --------------------------------------------------------------
+
+/** Run another flow as a node (nested agent / sub-agent composition). */
+const SubflowConfig = z.object({
+  flow: z.string(),
+  inputs: z.record(ExprSchema).default({}),
+  writeTo: z.string().optional(),
+});
+
+// --- catalog ----------------------------------------------------------------
+
+export interface NodeSpec {
+  type: string;
+  category: NodeCategory;
+  description: string;
+  configSchema: z.ZodTypeAny;
+  /** Static output handles, or "dynamic" when derived from config. */
+  outputs: readonly string[] | "dynamic";
+}
+
+const BUILTIN_SPECS: readonly NodeSpec[] = [
+  {
+    type: "input",
+    category: "io",
+    description: "Flow entry point; declares the input contract.",
+    configSchema: InputConfig,
+    outputs: ["out"],
+  },
+  {
+    type: "output",
+    category: "io",
+    description: "Flow exit point; surfaces a value as the run result.",
+    configSchema: OutputConfig,
+    outputs: [],
+  },
+  {
+    type: "agent",
+    category: "model",
+    description: "Model call with optional tool-use loop and structured output.",
+    configSchema: AgentConfig,
+    outputs: ["out"],
+  },
+  {
+    type: "classifier",
+    category: "model",
+    description: "Forced structured-output decision; branches on its classes.",
+    configSchema: ClassifierConfig,
+    outputs: "dynamic",
+  },
+  {
+    type: "branch",
+    category: "control",
+    description: "Boolean split.",
+    configSchema: BranchConfig,
+    outputs: ["true", "false"],
+  },
+  {
+    type: "switch",
+    category: "control",
+    description: "Multi-way split over named cases.",
+    configSchema: SwitchConfig,
+    outputs: "dynamic",
+  },
+  {
+    type: "loop",
+    category: "control",
+    description: "Bounded loop over a sub-flow body (reflection / optimizer).",
+    configSchema: LoopConfig,
+    outputs: ["out"],
+  },
+  {
+    type: "map",
+    category: "control",
+    description: "Concurrent fan-out over a collection with aggregation.",
+    configSchema: MapConfig,
+    outputs: ["out"],
+  },
+  {
+    type: "code",
+    category: "data",
+    description: "Deterministic function (registered handler or inline).",
+    configSchema: CodeConfig,
+    outputs: ["out"],
+  },
+  {
+    type: "retrieve",
+    category: "data",
+    description: "RAG retrieval from a vector store.",
+    configSchema: RetrieveConfig,
+    outputs: ["out"],
+  },
+  {
+    type: "transform",
+    category: "data",
+    description: "Pure expression evaluation over state.",
+    configSchema: TransformConfig,
+    outputs: ["out"],
+  },
+  {
+    type: "tool",
+    category: "tool",
+    description: "Invoke a registered tool (tiers + approval + resource).",
+    configSchema: ToolConfig,
+    outputs: ["out"],
+  },
+  {
+    type: "human",
+    category: "human",
+    description: "Durable human-in-the-loop pause (approve / select / annotate).",
+    configSchema: HumanConfig,
+    outputs: "dynamic",
+  },
+  {
+    type: "subflow",
+    category: "composite",
+    description: "Run another flow as a node (sub-agent composition).",
+    configSchema: SubflowConfig,
+    outputs: ["out"],
+  },
+];
+
+const REGISTRY = new Map<string, NodeSpec>(
+  BUILTIN_SPECS.map((spec) => [spec.type, spec]),
+);
+
+/** Register a plugin node type (or override a built-in). */
+export function registerNodeSpec(spec: NodeSpec): void {
+  REGISTRY.set(spec.type, spec);
+}
+
+export function getNodeSpec(type: string): NodeSpec | undefined {
+  return REGISTRY.get(type);
+}
+
+export function listNodeSpecs(): NodeSpec[] {
+  return [...REGISTRY.values()];
+}
+
+export const BUILTIN_NODE_TYPES = BUILTIN_SPECS.map((s) => s.type);
+
+/**
+ * Resolve the concrete output handles of a node instance, expanding "dynamic"
+ * specs (classifier classes, switch cases, human modes) from its config.
+ */
+export function resolveNodeOutputs(type: string, config: unknown): string[] {
+  const spec = getNodeSpec(type);
+  if (!spec) return [];
+  if (spec.outputs !== "dynamic") return [...spec.outputs];
+
+  const cfg = (config ?? {}) as Record<string, unknown>;
+  if (type === "classifier" && Array.isArray(cfg.classes)) {
+    return cfg.classes as string[];
+  }
+  if (type === "switch" && Array.isArray(cfg.cases)) {
+    return [...(cfg.cases as string[]), "default"];
+  }
+  if (type === "human") {
+    return cfg.mode === "approve" ? ["approved", "rejected"] : ["next"];
+  }
+  return [];
+}
