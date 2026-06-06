@@ -16,7 +16,8 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist .turbo"
+    "stress": "tsc -p tsconfig.json && tsc -p tsconfig.examples.json && node examples-dist/stress.js",
+    "clean": "rm -rf dist examples-dist .turbo"
   },
   "dependencies": {
     "zod": "^3.23.8"

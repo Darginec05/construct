@@ -26,6 +26,11 @@ export const NodeSchema = z.object({
 });
 export type FlowNode = z.infer<typeof NodeSchema>;
 
+/**
+ * A directed connection. A node with several incoming edges fires on ANY edge
+ * (OR-join) — which is what loop / branch re-entry relies on. For an AND barrier
+ * that waits for multiple parallel branches, route them through a `join` node.
+ */
 export const EdgeSchema = z.object({
   id: z.string(),
   source: z.string(),

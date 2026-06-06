@@ -81,6 +81,17 @@ export function validateFlow(flow: Flow): ValidationIssue[] {
         });
       }
     }
+
+    if (node.type === "join") {
+      const cfg = node.config as Record<string, unknown>;
+      if (cfg.mode === "quorum" && typeof cfg.count !== "number") {
+        issues.push({
+          level: "error",
+          nodeId: node.id,
+          message: `quorum join requires a numeric "count"`,
+        });
+      }
+    }
   }
 
   // Edges: endpoints exist; source handle is valid for the source node.

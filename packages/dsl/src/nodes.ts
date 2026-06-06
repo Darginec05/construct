@@ -32,9 +32,12 @@ const InputConfig = z.object({
   schema: z.record(DataTypeSchema).default({}),
 });
 
-/** Terminal. Surfaces a value (channel ref or expression) as the run result. */
+/**
+ * Terminal. Surfaces the run result: either a single value, or a named bundle
+ * (e.g. { url, zip, spec, changelog }) when a flow returns several artifacts.
+ */
 const OutputConfig = z.object({
-  from: ExprSchema,
+  from: z.union([ExprSchema, z.record(ExprSchema)]),
 });
 
 // --- model ------------------------------------------------------------------
@@ -43,6 +46,10 @@ const OutputConfig = z.object({
  * The workhorse: a model call that may run a multi-step tool-use loop. With
  * `output: { schema }` it returns structured JSON; with tools + maxSteps it is
  * a full agent loop. `model` is per-node so a flow can mix Haiku and Sonnet.
+ *
+ * Note: an evaluator / critic is just an `agent` with a structured `output`
+ * (e.g. { pass, issues }) feeding a `branch` — no dedicated node needed. The
+ * "verifier" can be deterministic instead by using a `code` node in its place.
  */
 const AgentConfig = z.object({
   model: ModelRefSchema,
@@ -110,6 +117,19 @@ const MapConfig = z.object({
   writeTo: z.string().optional(),
 });
 
+/**
+ * Explicit synchronization barrier. By default a node with several incoming
+ * edges fires on ANY edge (OR-join) — which is what loop / branch re-entry
+ * needs. A `join` instead waits for multiple parallel branches: `all` (every
+ * incoming branch), `any` (first wins), or `quorum` (first `count`).
+ */
+const JoinConfig = z.object({
+  mode: z.enum(["all", "any", "quorum"]).default("all"),
+  /** Required when mode is "quorum": how many branches must arrive. */
+  count: z.number().int().positive().optional(),
+  writeTo: z.string().optional(),
+});
+
 // --- data -------------------------------------------------------------------
 
 /** Deterministic function: a registered handler (`ref`) or inline source. */
@@ -160,10 +180,19 @@ const ToolConfig = z.object({
  * - `approve`: confirm/reject a proposed change. Handles: "approved"/"rejected".
  * - `select`: pick one of N candidates. Handle: "next".
  * - `annotate`: leave feedback and continue. Handle: "next".
+ * - `collect`: ask a free-text question and capture the reply into `writeTo`.
+ *   Wrap in a `loop` for a multi-turn intake that runs until a spec is complete.
+ *   Handle: "next".
+ *
+ * `exits` overrides the default handles for a custom gate — e.g. a 3-way review
+ * `["approved", "changes", "rejected"]` where the "changes" branch carries the
+ * user's free-text feedback (via `writeTo`) back to an orchestrator.
  */
 const HumanConfig = z.object({
-  mode: z.enum(["approve", "select", "annotate"]),
+  mode: z.enum(["approve", "select", "annotate", "collect"]),
   prompt: z.string().optional(),
+  /** Custom output handles; overrides the mode's defaults. */
+  exits: z.array(z.string()).min(1).optional(),
   /** Time-to-live for the pending decision, in seconds. */
   ttl: z.number().int().positive().optional(),
   writeTo: z.string().optional(),
@@ -171,7 +200,14 @@ const HumanConfig = z.object({
 
 // --- composite --------------------------------------------------------------
 
-/** Run another flow as a node (nested agent / sub-agent composition). */
+/**
+ * Run another flow as a node (nested agent / sub-agent composition).
+ *
+ * A dynamic supervisor — an orchestrator that invents a task list at runtime
+ * and dispatches each task to a different specialist — is expressed as
+ * `map(over: tasks) -> switch(on: task.type) -> subflow`, not a dedicated
+ * primitive: the worker is selected per item inside the map body.
+ */
 const SubflowConfig = z.object({
   flow: z.string(),
   inputs: z.record(ExprSchema).default({}),
@@ -244,6 +280,13 @@ const BUILTIN_SPECS: readonly NodeSpec[] = [
     category: "control",
     description: "Concurrent fan-out over a collection with aggregation.",
     configSchema: MapConfig,
+    outputs: ["out"],
+  },
+  {
+    type: "join",
+    category: "control",
+    description: "Synchronization barrier (all / any / quorum) for parallel branches.",
+    configSchema: JoinConfig,
     outputs: ["out"],
   },
   {
@@ -326,6 +369,9 @@ export function resolveNodeOutputs(type: string, config: unknown): string[] {
     return [...(cfg.cases as string[]), "default"];
   }
   if (type === "human") {
+    if (Array.isArray(cfg.exits) && cfg.exits.length > 0) {
+      return cfg.exits as string[];
+    }
     return cfg.mode === "approve" ? ["approved", "rejected"] : ["next"];
   }
   return [];

@@ -11,8 +11,11 @@ export function createEmptyFlow(id: string, name: string): Flow {
     schemaVersion: SCHEMA_VERSION,
     id,
     name,
+    channels: [],
+    resources: [],
     nodes: [],
     edges: [],
+    config: {},
     metadata: {},
   };
 }
