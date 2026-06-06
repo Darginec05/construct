@@ -33,6 +33,7 @@ export function buildParams(
   opts: ChatOptions,
   defaultMaxTokens: number,
 ): Anthropic.MessageCreateParamsNonStreaming {
+  if (!opts.model) throw new Error('buildParams: missing "model"');
   const systemParts: string[] = [];
   const apiMessages: Anthropic.MessageParam[] = [];
 
@@ -80,7 +81,7 @@ export function buildParams(
   }
 
   const params: Anthropic.MessageCreateParamsNonStreaming = {
-    model: opts.model ?? "",
+    model: opts.model,
     max_tokens: Number(opts.maxTokens ?? defaultMaxTokens),
     messages: apiMessages,
   };
@@ -90,11 +91,28 @@ export function buildParams(
     params.tools = opts.tools.map((t) => ({
       name: t.name,
       description: t.description,
-      input_schema: t.parameters as Anthropic.Tool.InputSchema,
+      input_schema: toInputSchema(t.name, t.parameters),
     }));
     params.tool_choice = toToolChoice(opts.toolChoice);
   }
   return params;
+}
+
+/** Tool JSON Schemas must be objects; reject anything else before it hits the API. */
+function toInputSchema(
+  tool: string,
+  parameters: unknown,
+): Anthropic.Tool.InputSchema {
+  if (
+    !parameters ||
+    typeof parameters !== "object" ||
+    (parameters as { type?: unknown }).type !== "object"
+  ) {
+    throw new Error(
+      `tool "${tool}": parameters must be a JSON Schema object ({ type: "object", ... })`,
+    );
+  }
+  return parameters as Anthropic.Tool.InputSchema;
 }
 
 function toToolChoice(choice: ChatOptions["toolChoice"]): Anthropic.ToolChoice {
@@ -146,13 +164,27 @@ export function createAnthropicProvider(
 ): ModelProvider {
   const id = options.id ?? "anthropic";
   const defaultMaxTokens = options.defaultMaxTokens ?? 1024;
-  const client = new Anthropic({
-    apiKey: options.apiKey ?? process.env.ANTHROPIC_API_KEY,
-    ...(options.baseUrl ? { baseURL: options.baseUrl } : {}),
-    timeout: options.timeoutMs ?? 60_000,
-    ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
-    ...(options.fetch ? { fetch: options.fetch } : {}),
-  });
+
+  // Constructed lazily so a missing key surfaces as a clear error at call time,
+  // not at provider-creation time (which may run before env is loaded).
+  let client: Anthropic | undefined;
+  const getClient = (): Anthropic => {
+    if (client) return client;
+    const apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        `provider "${id}": no API key (set ANTHROPIC_API_KEY or pass apiKey)`,
+      );
+    }
+    client = new Anthropic({
+      apiKey,
+      ...(options.baseUrl ? { baseURL: options.baseUrl } : {}),
+      timeout: options.timeoutMs ?? 60_000,
+      ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
+      ...(options.fetch ? { fetch: options.fetch } : {}),
+    });
+    return client;
+  };
 
   return {
     id,
@@ -161,11 +193,14 @@ export function createAnthropicProvider(
       const params = buildParams(messages, opts, defaultMaxTokens);
 
       if (opts.onDelta) {
-        const stream = client.messages.stream(params);
+        const stream = getClient().messages.stream(params);
+        // finalMessage() rejects on error; the no-op listener just keeps the
+        // EventEmitter from throwing an unhandled "error" first.
+        stream.on("error", () => {});
         stream.on("text", (delta) => opts.onDelta!(delta));
         return fromMessage(await stream.finalMessage());
       }
-      return fromMessage(await client.messages.create(params));
+      return fromMessage(await getClient().messages.create(params));
     },
   };
 }

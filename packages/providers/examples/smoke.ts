@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { buildParams, fromMessage } from "../dist/anthropic.js";
+import {
+  buildParams as buildOpenAIParams,
+  fromCompletion,
+} from "../dist/openai.js";
 import type { ChatMessage } from "../dist/index.js";
 
 function main(): void {
@@ -72,9 +76,82 @@ function main(): void {
   assert.equal(result.stopReason, "tool_use");
   assert.deepEqual(result.usage, { inputTokens: 10, outputTokens: 5 });
 
+  // --- OpenAI -------------------------------------------------------------
+
+  // buildParams: system stays a message; tool args become a JSON string.
+  const o1 = buildOpenAIParams(
+    [
+      { role: "system", content: "be terse" },
+      { role: "user", content: "look up 7" },
+    ],
+    {
+      model: "gpt-4o-mini",
+      temperature: 0.2,
+      tools: [
+        {
+          name: "lookup",
+          description: "Look up a record",
+          parameters: { type: "object", properties: { id: { type: "number" } } },
+        },
+      ],
+      toolChoice: "required",
+    },
+    1024,
+  );
+  assert.equal(o1.max_tokens, 1024, "default max_tokens applied");
+  assert.equal(o1.temperature, 0.2);
+  assert.equal(o1.tool_choice, "required", "toolChoice mapped to a bare string");
+  assert.equal((o1.tools as any)[0].function.name, "lookup", "tool mapped");
+  assert.equal(o1.messages[0]!.role, "system", "system kept as a message");
+  assert.equal(o1.messages.length, 2, "system not stripped");
+
+  // buildParams: a tool round-trip keeps one tool message per result.
+  const o2 = buildOpenAIParams(convo, { model: "m" }, undefined);
+  assert.equal(o2.max_tokens, undefined, "max_tokens omitted when no cap given");
+  const oAssistant = o2.messages[1]! as any;
+  assert.equal(oAssistant.tool_calls[0].id, "tu_1");
+  assert.equal(
+    oAssistant.tool_calls[0].function.arguments,
+    JSON.stringify({ id: 7 }),
+    "arguments serialized to a JSON string",
+  );
+  assert.equal(o2.messages[2]!.role, "tool", "tool results stay tool messages");
+  assert.equal(o2.messages.length, 4, "results not grouped into one turn");
+
+  // fromCompletion: assemble text, tool calls, finish reason, and usage.
+  const oResult = fromCompletion({
+    choices: [
+      {
+        index: 0,
+        finish_reason: "tool_calls",
+        logprobs: null,
+        message: {
+          role: "assistant",
+          content: "hi",
+          refusal: null,
+          tool_calls: [
+            {
+              id: "t1",
+              type: "function",
+              function: { name: "lookup", arguments: '{"id":7}' },
+            },
+          ],
+        },
+      },
+    ],
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+  } as Parameters<typeof fromCompletion>[0]);
+  assert.equal(oResult.text, "hi");
+  assert.deepEqual(oResult.toolCalls, [
+    { id: "t1", name: "lookup", arguments: { id: 7 } },
+  ]);
+  assert.equal(oResult.stopReason, "tool_calls");
+  assert.deepEqual(oResult.usage, { inputTokens: 10, outputTokens: 5 });
+
   console.log("providers smoke: all assertions passed");
   console.log("  params ->", JSON.stringify({ system: p1.system, tool_choice: p1.tool_choice }));
   console.log("  result ->", JSON.stringify(result));
+  console.log("  openai ->", JSON.stringify(oResult));
 }
 
 main();

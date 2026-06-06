@@ -84,6 +84,15 @@ registerStore(
   ]),
 );
 
+// A Cyrillic store proves the tokenizer is not ASCII-only.
+registerStore(
+  "kb-ru",
+  createMemoryStore([
+    { id: "ru-a", text: "политика возврата и счета по оплате" },
+    { id: "ru-b", text: "сброс пароля и вход в аккаунт" },
+  ]),
+);
+
 const flow: Flow = {
   schemaVersion: SCHEMA_VERSION,
   id: "support-router",
@@ -266,6 +275,19 @@ async function main(): Promise<void> {
   const docs = ragRes.state.docs as Array<{ id: string; score: number }>;
   assert.ok(docs.length >= 1 && docs.length <= 2, "respects topK");
   assert.equal(docs[0]!.id, "a", "billing doc ranked first for a billing query");
+
+  // Cyrillic retrieval must not collapse to zero hits.
+  const ruRes = await runFlow(
+    { ...ragFlow, id: "rag-ru", nodes: ragFlow.nodes.map((n) =>
+        n.id === "find"
+          ? { ...n, config: { ...n.config, store: "kb-ru" } }
+          : n,
+      ) },
+    { input: { q: "возврата счета оплате" } },
+  );
+  assert.equal(ruRes.status, "completed");
+  const ruDocs = ruRes.state.docs as Array<{ id: string }>;
+  assert.equal(ruDocs[0]!.id, "ru-a", "Cyrillic query retrieves the matching doc");
 
   console.log("nodes smoke: all assertions passed");
   console.log("  state ->", JSON.stringify(res.state));

@@ -68,3 +68,4 @@ export function listProviders(): ModelProvider[] {
 }
 
 export { createAnthropicProvider, type AnthropicOptions } from "./anthropic.js";
+export { createOpenAIProvider, type OpenAIOptions } from "./openai.js";
