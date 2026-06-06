@@ -99,6 +99,7 @@ export async function runFlow(
       config: node.config,
       state,
       evaluate: (e) => evaluate(e, state),
+      onDelta: (text) => emit({ type: "token", nodeId, data: text }),
     };
 
     let outcome: StepOutcome;

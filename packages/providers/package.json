@@ -11,14 +11,20 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist .turbo"
+    "smoke": "tsc -p tsconfig.json && tsc -p tsconfig.examples.json && node examples-dist/smoke.js",
+    "clean": "rm -rf dist examples-dist .turbo"
   },
   "devDependencies": {
     "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.102.0"
   }
 }

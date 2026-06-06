@@ -23,6 +23,7 @@
     "@construct/dsl": "*",
     "@construct/engine": "*",
     "@construct/providers": "*",
+    "@construct/rag": "*",
     "@construct/tools": "*"
   },
   "devDependencies": {

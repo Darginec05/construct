@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "examples",
+    "outDir": "examples-dist",
+    "noEmit": false
+  },
+  "include": ["examples"]
+}

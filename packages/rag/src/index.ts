@@ -23,3 +23,20 @@ export function chunkText(text: string, size = 1000, overlap = 200): string[] {
   }
   return chunks;
 }
+
+const stores = new Map<string, VectorStore>();
+
+/** Register a vector store under the name a `retrieve` node refers to. */
+export function registerStore(name: string, store: VectorStore): void {
+  stores.set(name, store);
+}
+
+export function getStore(name: string): VectorStore | undefined {
+  return stores.get(name);
+}
+
+export function listStores(): string[] {
+  return [...stores.keys()];
+}
+
+export { createMemoryStore } from "./memory.js";

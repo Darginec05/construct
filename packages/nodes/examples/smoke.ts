@@ -7,7 +7,8 @@ import {
   type ChatResult,
 } from "@construct/providers";
 import { registerTool } from "@construct/tools";
-import "../dist/index.js"; // registers agent / classifier / tool executors
+import { createMemoryStore, registerStore } from "@construct/rag";
+import "../dist/index.js"; // registers agent / classifier / tool / retrieve executors
 
 function userText(messages: ChatMessage[]): string {
   const m = messages.find((x) => x.role === "user");
@@ -56,6 +57,32 @@ registerTool({
     return `record#${id}`;
   },
 });
+
+/** A model that never settles — always asks for the tool again. */
+registerProvider({
+  id: "loopy",
+  async chat(): Promise<ChatResult> {
+    return { text: "", toolCalls: [{ id: "c", name: "lookup", arguments: {} }] };
+  },
+});
+
+/** A model that streams its answer in chunks via onDelta. */
+registerProvider({
+  id: "streamer",
+  async chat(_messages, opts): Promise<ChatResult> {
+    for (const chunk of ["he", "llo"]) opts?.onDelta?.(chunk);
+    return { text: "hello" };
+  },
+});
+
+registerStore(
+  "kb",
+  createMemoryStore([
+    { id: "a", text: "billing invoices and refunds policy" },
+    { id: "b", text: "password reset and login support" },
+    { id: "c", text: "shipping and delivery times" },
+  ]),
+);
 
 const flow: Flow = {
   schemaVersion: SCHEMA_VERSION,
@@ -155,10 +182,97 @@ async function main(): Promise<void> {
     "model answered from the tool result",
   );
 
+  // A non-terminating tool loop must surface as a failure, not empty output.
+  const stuck: Flow = {
+    ...toolFlow,
+    id: "agent-stuck",
+    nodes: [
+      { id: "in", type: "input", config: {} },
+      {
+        id: "act",
+        type: "agent",
+        config: {
+          model: { provider: "loopy", model: "m" },
+          prompt: "go",
+          tools: ["lookup"],
+          maxSteps: 3,
+          writeTo: "answer",
+        },
+      },
+      { id: "out", type: "output", config: { from: "$.answer" } },
+    ],
+  };
+  const stuckRes = await runFlow(stuck, { input: {} });
+  assert.equal(stuckRes.status, "failed", "exhausted tool loop fails the run");
+  assert.match(String(stuckRes.error), /maxSteps/, "error names the cap");
+
+  // streamed text surfaces as token events for the streaming agent's node.
+  const streaming: Flow = {
+    ...toolFlow,
+    id: "agent-stream",
+    nodes: [
+      { id: "in", type: "input", config: {} },
+      {
+        id: "act",
+        type: "agent",
+        config: {
+          model: { provider: "streamer", model: "m" },
+          prompt: "go",
+          writeTo: "answer",
+        },
+      },
+      { id: "out", type: "output", config: { from: "$.answer" } },
+    ],
+  };
+  const tokens: string[] = [];
+  const streamRes = await runFlow(streaming, {
+    input: {},
+    onEvent: (e) => {
+      if (e.type === "token" && e.nodeId === "act") tokens.push(String(e.data));
+    },
+  });
+  assert.equal(streamRes.status, "completed");
+  assert.equal(streamRes.output, "hello", "final text still assembled");
+  assert.deepEqual(tokens, ["he", "llo"], "deltas surfaced as token events");
+
+  // retrieve pulls the most relevant docs from a registered store.
+  const ragFlow: Flow = {
+    schemaVersion: SCHEMA_VERSION,
+    id: "rag",
+    name: "retrieve top-k",
+    channels: [
+      { name: "q", type: "text", reducer: "lastValue" },
+      { name: "docs", type: "json", reducer: "lastValue" },
+    ],
+    resources: [],
+    nodes: [
+      { id: "in", type: "input", config: { schema: { q: "text" } } },
+      {
+        id: "find",
+        type: "retrieve",
+        config: { store: "kb", query: "{{q}}", topK: 2, writeTo: "docs" },
+      },
+      { id: "out", type: "output", config: { from: "$.docs" } },
+    ],
+    edges: [
+      { id: "e1", source: "in", target: "find" },
+      { id: "e2", source: "find", target: "out" },
+    ],
+    config: {},
+    metadata: {},
+  };
+  const ragRes = await runFlow(ragFlow, { input: { q: "billing invoices refunds" } });
+  assert.equal(ragRes.status, "completed");
+  const docs = ragRes.state.docs as Array<{ id: string; score: number }>;
+  assert.ok(docs.length >= 1 && docs.length <= 2, "respects topK");
+  assert.equal(docs[0]!.id, "a", "billing doc ranked first for a billing query");
+
   console.log("nodes smoke: all assertions passed");
   console.log("  state ->", JSON.stringify(res.state));
   console.log("  output ->", res.output);
   console.log("  loop   ->", loop.output);
+  console.log("  stream ->", tokens.join(""));
+  console.log("  rag    ->", JSON.stringify(docs.map((d) => d.id)));
 }
 
 main().catch((err) => {

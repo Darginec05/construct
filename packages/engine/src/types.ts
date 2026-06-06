@@ -14,6 +14,7 @@ export interface RunEvent {
     | "node-finish"
     | "run-finish"
     | "paused"
+    | "token"
     | "error";
   nodeId?: string;
   data?: unknown;
@@ -63,6 +64,8 @@ export interface ExecutorContext {
   state: RunState;
   /** Evaluate a DSL expression (or bundle) against the current state. */
   evaluate(expr: unknown): unknown;
+  /** Emit a streamed text chunk as a `token` event for the current node. */
+  onDelta(text: string): void;
 }
 
 /** What a node implementation returns. */

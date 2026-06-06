@@ -9,6 +9,7 @@ import {
   type ToolSpec,
 } from "@construct/providers";
 import { getTool } from "@construct/tools";
+import { getStore } from "@construct/rag";
 
 /**
  * Built-in leaf-node executors. These are the node types that need external
@@ -21,6 +22,7 @@ interface ModelRef {
   provider: string;
   model: string;
   temperature?: number;
+  maxTokens?: number;
 }
 
 function patch(writeTo: unknown, value: unknown): ExecutorResult {
@@ -83,29 +85,46 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
   messages.push({ role: "user", content: prompt == null ? "" : String(prompt) });
 
   let text = "";
+  let pendingTools = false;
   for (let step = 0; step < maxSteps; step++) {
     const res = await provider.chat(messages, {
       model: model!.model,
       temperature: model!.temperature,
+      maxTokens: model!.maxTokens,
       tools: tools.length > 0 ? tools : undefined,
       toolChoice: tools.length > 0 ? toolChoice : undefined,
+      onDelta: (text) => ctx.onDelta(text),
     });
     text = res.text;
-    if (!res.toolCalls || res.toolCalls.length === 0) break;
+    if (!res.toolCalls || res.toolCalls.length === 0) {
+      pendingTools = false;
+      break;
+    }
+    pendingTools = true;
 
     messages.push({ role: "assistant", content: res.text, toolCalls: res.toolCalls });
-    for (const call of res.toolCalls) {
-      const impl = getTool(call.name);
-      if (!impl) {
-        throw new Error(`agent node: model called unknown tool "${call.name}"`);
-      }
-      const out = await impl.run(call.arguments);
+    const results = await Promise.all(
+      res.toolCalls.map(async (call) => {
+        const impl = getTool(call.name);
+        if (!impl) {
+          throw new Error(`agent node: model called unknown tool "${call.name}"`);
+        }
+        const out = await impl.run(call.arguments);
+        return { call, out };
+      }),
+    );
+    for (const { call, out } of results) {
       messages.push({
         role: "tool",
         toolCallId: call.id,
         content: typeof out === "string" ? out : JSON.stringify(out),
       });
     }
+  }
+  if (pendingTools) {
+    throw new Error(
+      `agent node: tool-use loop hit maxSteps (${maxSteps}) with the model still requesting tools`,
+    );
   }
   return patch(ctx.config.writeTo, parseOutput(ctx.config.output, text));
 }
@@ -159,10 +178,22 @@ async function tool(ctx: ExecutorContext): Promise<ExecutorResult> {
   return patch(ctx.config.writeTo, result);
 }
 
+/** `retrieve`: query a registered vector store and write back the matches. */
+async function retrieve(ctx: ExecutorContext): Promise<ExecutorResult> {
+  const name = ctx.config.store as string;
+  const store = getStore(name);
+  if (!store) throw new Error(`retrieve node: no store registered as "${name}"`);
+  const query = ctx.evaluate(ctx.config.query);
+  const topK = Math.max(1, Number(ctx.config.topK ?? 5));
+  const docs = await store.query(query == null ? "" : String(query), topK);
+  return patch(ctx.config.writeTo, docs);
+}
+
 export function registerBuiltinNodes(): void {
   registerExecutor("agent", agent);
   registerExecutor("classifier", classifier);
   registerExecutor("tool", tool);
+  registerExecutor("retrieve", retrieve);
 }
 
 registerBuiltinNodes();

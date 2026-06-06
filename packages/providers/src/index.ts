@@ -23,16 +23,28 @@ export type ChatMessage =
 export interface ChatOptions {
   model?: string;
   temperature?: number;
+  maxTokens?: number;
   /** Tools the model may call this turn. */
   tools?: ToolSpec[];
   toolChoice?: "auto" | "required" | "none";
+  /** Called with each text chunk as it streams in. Providers may ignore it. */
+  onDelta?: (text: string) => void;
   [key: string]: unknown;
+}
+
+/** Token accounting for one model turn. */
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
 }
 
 /** One model turn: free text plus any tool calls the model wants run. */
 export interface ChatResult {
   text: string;
   toolCalls?: ToolCall[];
+  /** Why the model stopped (e.g. "end_turn", "tool_use", "max_tokens"). */
+  stopReason?: string;
+  usage?: Usage;
 }
 
 /** Abstraction over a chat-capable model provider (OpenAI, Anthropic, Ollama, ...). */
@@ -54,3 +66,5 @@ export function getProvider(id: string): ModelProvider | undefined {
 export function listProviders(): ModelProvider[] {
   return [...registry.values()];
 }
+
+export { createAnthropicProvider, type AnthropicOptions } from "./anthropic.js";
