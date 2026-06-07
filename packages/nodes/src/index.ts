@@ -8,7 +8,7 @@ import {
   type ChatMessage,
   type ToolSpec,
 } from "@construct/providers";
-import { getTool, runTool } from "@construct/tools";
+import { getTool, needsApproval, runTool } from "@construct/tools";
 import { getStore } from "@construct/rag";
 
 /**
@@ -111,6 +111,21 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
         const impl = getTool(call.name);
         if (!impl) {
           return { call, content: `Error: unknown tool "${call.name}"` };
+        }
+        // Gated tools (write/bulk/dangerous or requiresApproval) need explicit
+        // human approval. Fail safe: with no approver configured, deny.
+        if (needsApproval(impl)) {
+          const decision = ctx.requestApproval
+            ? await ctx.requestApproval({
+                tool: impl.name,
+                tier: impl.tier,
+                args: call.arguments,
+              })
+            : { approved: false, reason: "no approver configured" };
+          if (!decision.approved) {
+            const why = decision.reason ? ` (${decision.reason})` : "";
+            return { call, content: `Error: tool "${impl.name}" was not approved${why}` };
+          }
         }
         const result = await runTool(impl, call.arguments);
         const content = result.ok

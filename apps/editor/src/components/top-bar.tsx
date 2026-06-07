@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { validateFlow } from "@construct/dsl";
 import {
   Layers,
+  Loader2,
   Moon,
   PanelRight,
   Play,
@@ -39,7 +40,7 @@ export function TopBar({
   onToggleRight: () => void;
 }) {
   const { theme, toggle } = useTheme();
-  const { activeFlow, activeFlowId, renameFlow } = useFlow();
+  const { activeFlow, activeFlowId, renameFlow, runStatus, runActiveFlow } = useFlow();
 
   const { errors, warnings } = useMemo(() => {
     const issues = validateFlow(toDslFlow(activeFlow));
@@ -49,12 +50,12 @@ export function TopBar({
     };
   }, [activeFlow]);
 
+  const running = runStatus === "running";
+
   return (
     <header className="flex items-center gap-2 border-b border-border px-3">
       <div className="flex items-center gap-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <Workflow size={14} />
-        </span>
+        <img src="/brand/favicon.svg" alt="Construct" width={24} height={24} className="h-6 w-6 rounded-md" />
         <span className="text-sm font-semibold tracking-tight">Construct</span>
       </div>
 
@@ -96,11 +97,13 @@ export function TopBar({
 
         <button
           type="button"
-          disabled
-          title="Run — runtime not wired yet (#27)"
-          className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-[12px] font-medium text-primary-foreground opacity-50"
+          onClick={runActiveFlow}
+          disabled={running || errors > 0}
+          title={errors > 0 ? "Fix validation errors to run" : "Run in the sandbox (simulated model)"}
+          className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-[12px] font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
         >
-          <Play size={14} /> Run
+          {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+          {running ? "Running…" : "Run"}
         </button>
         <button
           type="button"

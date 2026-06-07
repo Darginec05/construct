@@ -95,11 +95,15 @@ export async function runFlow(
     if (!node) continue;
 
     emit({ type: "node-start", nodeId });
+    const onToolApproval = options.onToolApproval;
     const ctx: ExecutorContext = {
       config: node.config,
       state,
       evaluate: (e) => evaluate(e, state),
       onDelta: (text) => emit({ type: "token", nodeId, data: text }),
+      requestApproval: onToolApproval
+        ? (req) => Promise.resolve(onToolApproval({ nodeId, ...req }))
+        : undefined,
     };
 
     let outcome: StepOutcome;

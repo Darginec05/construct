@@ -67,9 +67,10 @@ export function listProviders(): ModelProvider[] {
   return [...registry.values()];
 }
 
-export { createAnthropicProvider, type AnthropicOptions } from "./anthropic.js";
-export { createOpenAIProvider, type OpenAIOptions } from "./openai.js";
-export { createGeminiProvider, type GeminiOptions } from "./gemini.js";
+// SDK-backed providers (Anthropic / OpenAI / Gemini) live behind the
+// `@construct/providers/node` entry point so this barrel stays free of the
+// Node-only SDKs — browser bundles (the editor) can import the registry and the
+// fake provider without pulling the SDKs into the module graph.
 export {
   createFakeProvider,
   type FakeOptions,

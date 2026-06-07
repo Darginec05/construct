@@ -2,6 +2,7 @@ import { resolveNodeOutputs } from "@construct/dsl";
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import { catalogEntry, CATEGORY_META } from "../lib/catalog.ts";
+import { useFlow, type NodeRunState } from "./flow-context.tsx";
 
 export interface ConstructNodeData {
   type: string;
@@ -9,11 +10,19 @@ export interface ConstructNodeData {
   label?: string;
 }
 
-function ConstructNodeImpl({ data, selected }: NodeProps<ConstructNodeData>) {
+const RUN_RING: Record<NodeRunState, string> = {
+  running: "hsl(var(--cat-control))",
+  done: "hsl(var(--cat-tool))",
+  error: "hsl(var(--destructive))",
+};
+
+function ConstructNodeImpl({ id, data, selected }: NodeProps<ConstructNodeData>) {
   const entry = catalogEntry(data.type);
   const hueVar = entry ? CATEGORY_META[entry.category].hueVar : "--cat-io";
   const Icon = entry?.icon;
   const outputs = resolveNodeOutputs(data.type, data.config);
+  const { nodeRun } = useFlow();
+  const status = nodeRun[id];
 
   return (
     <div
@@ -21,7 +30,12 @@ function ConstructNodeImpl({ data, selected }: NodeProps<ConstructNodeData>) {
       style={{
         // @ts-expect-error custom property
         "--cat": `var(${hueVar})`,
-        borderColor: selected ? "hsl(var(--cat))" : "hsl(var(--border))",
+        borderColor: status
+          ? RUN_RING[status]
+          : selected
+            ? "hsl(var(--cat))"
+            : "hsl(var(--border))",
+        boxShadow: status ? `0 0 0 2px ${RUN_RING[status]}` : undefined,
       }}
     >
       <Handle
@@ -37,6 +51,13 @@ function ConstructNodeImpl({ data, selected }: NodeProps<ConstructNodeData>) {
         <span className="truncate text-[13px] font-medium">
           {data.label ?? entry?.label ?? data.type}
         </span>
+        {status ? (
+          <span
+            className={`ml-auto h-2 w-2 shrink-0 rounded-full ${status === "running" ? "animate-pulse" : ""}`}
+            style={{ background: RUN_RING[status] }}
+            title={status}
+          />
+        ) : null}
       </div>
 
       <div className="relative px-3 py-2 text-[11px] text-muted-foreground">

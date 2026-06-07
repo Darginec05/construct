@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import {
   applyEdgeChanges,
   applyNodeChanges,
@@ -7,10 +7,15 @@ import {
   type OnEdgesChange,
   type OnNodesChange,
 } from "reactflow";
+import type { RunEvent } from "@construct/engine";
+import { executeFlow } from "../lib/runtime.ts";
 import type { ConstructNodeData } from "./construct-node.tsx";
 
 export type FlowNode = Node<ConstructNodeData>;
 export type FlowKind = "main" | "sub";
+
+export type RunStatus = "idle" | "running" | "completed" | "paused" | "failed";
+export type NodeRunState = "running" | "done" | "error";
 
 export interface FlowDoc {
   id: string;
@@ -27,9 +32,21 @@ const INITIAL_FLOWS: FlowDoc[] = [
     name: "Assistant",
     kind: "main",
     nodes: [
-      { id: "in", type: "construct", position: { x: 0, y: 120 }, data: { type: "input", config: {} } },
-      { id: "ag", type: "construct", position: { x: 320, y: 120 }, data: { type: "agent", config: {} } },
-      { id: "out", type: "construct", position: { x: 640, y: 120 }, data: { type: "output", config: {} } },
+      { id: "in", type: "construct", position: { x: 0, y: 120 }, data: { type: "input", config: { schema: { message: "text" } } } },
+      {
+        id: "ag",
+        type: "construct",
+        position: { x: 320, y: 120 },
+        data: {
+          type: "agent",
+          config: {
+            model: { provider: "anthropic", model: "claude-sonnet-4-6" },
+            prompt: "{{ $.message }}",
+            writeTo: "reply",
+          },
+        },
+      },
+      { id: "out", type: "construct", position: { x: 640, y: 120 }, data: { type: "output", config: { from: "$.reply" } } },
     ],
     edges: [
       { id: "e1", source: "in", target: "ag" },
@@ -42,9 +59,21 @@ const INITIAL_FLOWS: FlowDoc[] = [
     kind: "sub",
     parent: "main",
     nodes: [
-      { id: "r-in", type: "construct", position: { x: 0, y: 120 }, data: { type: "input", config: {} } },
-      { id: "r-ag", type: "construct", position: { x: 320, y: 120 }, data: { type: "agent", config: {} } },
-      { id: "r-out", type: "construct", position: { x: 640, y: 120 }, data: { type: "output", config: {} } },
+      { id: "r-in", type: "construct", position: { x: 0, y: 120 }, data: { type: "input", config: { schema: { draft: "text" } } } },
+      {
+        id: "r-ag",
+        type: "construct",
+        position: { x: 320, y: 120 },
+        data: {
+          type: "agent",
+          config: {
+            model: { provider: "anthropic", model: "claude-sonnet-4-6" },
+            prompt: "{{ $.draft }}",
+            writeTo: "review",
+          },
+        },
+      },
+      { id: "r-out", type: "construct", position: { x: 640, y: 120 }, data: { type: "output", config: { from: "$.review" } } },
     ],
     edges: [
       { id: "re1", source: "r-in", target: "r-ag" },
@@ -72,6 +101,16 @@ interface FlowStore {
   setSelectedId: (id: string | null) => void;
   selectedNode: FlowNode | null;
   updateNodeConfig: (id: string, patch: Record<string, unknown>) => void;
+  // --- sandbox run state ---
+  runStatus: RunStatus;
+  nodeRun: Record<string, NodeRunState>;
+  trace: RunEvent[];
+  runOutput: unknown;
+  runError: string | null;
+  inputValues: Record<string, string>;
+  setInputValue: (key: string, value: string) => void;
+  runActiveFlow: () => Promise<void>;
+  clearRun: () => void;
 }
 
 const FlowCtx = createContext<FlowStore | null>(null);
@@ -84,6 +123,13 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   const [byId, setById] = useState<Record<string, FlowDoc>>(() => keyBy(INITIAL_FLOWS));
   const [activeFlowId, setActiveId] = useState<string>(() => INITIAL_FLOWS[0]!.id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const [runStatus, setRunStatus] = useState<RunStatus>("idle");
+  const [nodeRun, setNodeRun] = useState<Record<string, NodeRunState>>({});
+  const [trace, setTrace] = useState<RunEvent[]>([]);
+  const [runOutput, setRunOutput] = useState<unknown>(undefined);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
 
   const activeFlow = byId[activeFlowId]!;
 
@@ -138,6 +184,57 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     [activeFlow, selectedId],
   );
 
+  // Keep a live snapshot so run callbacks always see the latest graph + inputs
+  // without re-creating on every keystroke.
+  const snapRef = useRef({ activeFlow, flows, inputValues });
+  snapRef.current = { activeFlow, flows, inputValues };
+
+  const setInputValue = useCallback((key: string, value: string) => {
+    setInputValues((v) => ({ ...v, [key]: value }));
+  }, []);
+
+  const clearRun = useCallback(() => {
+    setRunStatus("idle");
+    setNodeRun({});
+    setTrace([]);
+    setRunOutput(undefined);
+    setRunError(null);
+  }, []);
+
+  const runActiveFlow = useCallback(async () => {
+    const { activeFlow, flows, inputValues } = snapRef.current;
+    setRunStatus("running");
+    setNodeRun({});
+    setTrace([]);
+    setRunOutput(undefined);
+    setRunError(null);
+
+    const inputNode = activeFlow.nodes.find((n) => n.data.type === "input");
+    const schema = (inputNode?.data.config.schema as Record<string, string> | undefined) ?? {};
+    const input: Record<string, unknown> = {};
+    for (const [key, type] of Object.entries(schema)) {
+      const raw = inputValues[key] ?? "";
+      input[key] = type.includes("number") ? Number(raw) : raw;
+    }
+
+    try {
+      const result = await executeFlow(activeFlow, flows, input, (event) => {
+        setTrace((t) => [...t, event]);
+        if (event.nodeId == null) return;
+        const id = event.nodeId;
+        if (event.type === "node-start") setNodeRun((m) => ({ ...m, [id]: "running" }));
+        else if (event.type === "node-finish") setNodeRun((m) => ({ ...m, [id]: "done" }));
+        else if (event.type === "error") setNodeRun((m) => ({ ...m, [id]: "error" }));
+      });
+      setRunStatus(result.status);
+      setRunOutput(result.output);
+      setRunError(result.error ?? null);
+    } catch (err) {
+      setRunStatus("failed");
+      setRunError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
   const value = useMemo<FlowStore>(
     () => ({
       flows,
@@ -155,6 +252,15 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       setSelectedId,
       selectedNode,
       updateNodeConfig,
+      runStatus,
+      nodeRun,
+      trace,
+      runOutput,
+      runError,
+      inputValues,
+      setInputValue,
+      runActiveFlow,
+      clearRun,
     }),
     [
       flows,
@@ -169,6 +275,15 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       selectedId,
       selectedNode,
       updateNodeConfig,
+      runStatus,
+      nodeRun,
+      trace,
+      runOutput,
+      runError,
+      inputValues,
+      setInputValue,
+      runActiveFlow,
+      clearRun,
     ],
   );
 

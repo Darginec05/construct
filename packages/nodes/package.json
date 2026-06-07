@@ -17,6 +17,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
     "smoke": "tsc -p tsconfig.json && tsc -p tsconfig.examples.json && node examples-dist/smoke.js",
     "clean": "rm -rf dist examples-dist .turbo"
   },
@@ -28,6 +29,7 @@
     "@construct/tools": "*"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
   }
 }

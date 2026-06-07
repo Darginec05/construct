@@ -6,11 +6,11 @@ import { toJsonSchema } from "./schema.js";
  * A callable tool an agent can invoke. The Plugin SDK builds on this interface.
  *
  * `tier` declares the intrinsic safety class of the tool (see {@link ToolTier});
- * `requiresApproval` lets a tool force a gate regardless of tier. These are the
- * inputs a host's approval policy is meant to consult (read/content auto-run;
- * write/bulk/dangerous route through human approval) — but note the engine does
- * not yet enforce them: the agent loop currently runs any registered tool. Tier
- * gating is the gating work that pairs with mounting MCP.
+ * `requiresApproval` lets a tool force a gate regardless of tier. {@link
+ * needsApproval} turns these into a yes/no decision (read/content auto-run;
+ * write/bulk/dangerous route through human approval), which the agent loop
+ * enforces via the engine's approval callback. The standalone `tool` node is not
+ * yet gated — author an explicit human-approve node before it.
  */
 export interface Tool<Input = unknown, Output = unknown> {
   name: string;
@@ -26,6 +26,29 @@ export interface Tool<Input = unknown, Output = unknown> {
 
 export type { ToolTier };
 export { toJsonSchema };
+
+/**
+ * Tiers that route through human approval before running. read/content fetch or
+ * inspect and auto-run; write/bulk/dangerous mutate or destroy and are gated.
+ */
+export const DEFAULT_GATED_TIERS: readonly ToolTier[] = [
+  "write",
+  "bulk",
+  "dangerous",
+];
+
+/**
+ * Whether a tool call must be approved by a human before it runs. A tool opts in
+ * explicitly via `requiresApproval`, or implicitly by declaring a gated `tier`.
+ * An untiered tool is treated as safe (not gated) — declare a tier to gate it.
+ */
+export function needsApproval(
+  tool: Pick<Tool, "tier" | "requiresApproval">,
+  gatedTiers: readonly ToolTier[] = DEFAULT_GATED_TIERS,
+): boolean {
+  if (tool.requiresApproval) return true;
+  return tool.tier != null && gatedTiers.includes(tool.tier);
+}
 
 /**
  * Author a tool from a Zod input schema. The schema is used both to derive the

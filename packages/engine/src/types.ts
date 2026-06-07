@@ -28,6 +28,29 @@ export interface HumanDecision {
   patch?: Record<string, unknown>;
 }
 
+/**
+ * A request to approve a gated tool call before it runs. Raised by leaf
+ * executors (e.g. the agent loop) for tools whose tier requires human approval.
+ * `tier` is the tool's declared safety class, left as a string so the engine
+ * does not depend on the tools package.
+ */
+export interface ToolApprovalRequest {
+  /** Node that wants to run the tool. */
+  nodeId: string;
+  /** Registered name of the tool. */
+  tool: string;
+  /** The tool's declared tier, if any. */
+  tier?: string;
+  /** Arguments the model proposed for the call. */
+  args: unknown;
+}
+
+export interface ToolApprovalDecision {
+  approved: boolean;
+  /** Optional rationale, surfaced back to the model on rejection. */
+  reason?: string;
+}
+
 export interface RunOptions {
   /** The run input payload; its fields seed channels of the same name. */
   input?: RunState;
@@ -41,6 +64,18 @@ export interface RunOptions {
     node: FlowNode,
     ctx: ExecutorContext,
   ) => HumanDecision | Promise<HumanDecision>;
+  /**
+   * Approves (or rejects) a gated tool call. When absent, executors must fail
+   * safe and treat gated calls as rejected.
+   *
+   * Unlike a `human` node, this resolves *inline* — it holds the run open while
+   * awaiting the decision. It suits programmatic policy (allow-lists, auto-deny)
+   * or a short-lived interactive session, NOT durable human approval that may
+   * take hours; durable pause/resume of an agent mid-loop is not yet supported.
+   */
+  onToolApproval?: (
+    req: ToolApprovalRequest,
+  ) => ToolApprovalDecision | Promise<ToolApprovalDecision>;
   /** Global guard against runaway cycles. Default 1000. */
   maxSteps?: number;
   /** Run assertValidFlow before executing. Default true. */
@@ -66,6 +101,14 @@ export interface ExecutorContext {
   evaluate(expr: unknown): unknown;
   /** Emit a streamed text chunk as a `token` event for the current node. */
   onDelta(text: string): void;
+  /**
+   * Request human approval for a gated tool call. The engine injects the
+   * current node id. Absent when the host configured no approver — callers must
+   * then fail safe (treat the call as rejected).
+   */
+  requestApproval?: (
+    req: Omit<ToolApprovalRequest, "nodeId">,
+  ) => Promise<ToolApprovalDecision>;
 }
 
 /** What a node implementation returns. */

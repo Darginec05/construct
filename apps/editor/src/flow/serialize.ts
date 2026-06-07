@@ -1,4 +1,4 @@
-import { SCHEMA_VERSION, type Flow } from "@construct/dsl";
+import { SCHEMA_VERSION, type Channel, type Flow } from "@construct/dsl";
 import type { FlowDoc } from "./flow-context.tsx";
 
 /** Project the editor's working flow into the canonical DSL Flow shape. */
@@ -7,7 +7,9 @@ export function toDslFlow(doc: FlowDoc): Flow {
     schemaVersion: SCHEMA_VERSION,
     id: doc.id,
     name: doc.name,
-    channels: [],
+    // The editor has no channel surface yet: auto-declare a lastValue channel
+    // for every `writeTo` target so flows validate and run.
+    channels: deriveChannels(doc),
     resources: [],
     nodes: doc.nodes.map((n) => ({
       id: n.id,
@@ -25,4 +27,13 @@ export function toDslFlow(doc: FlowDoc): Flow {
     config: {},
     metadata: {},
   };
+}
+
+function deriveChannels(doc: FlowDoc): Channel[] {
+  const names = new Set<string>();
+  for (const n of doc.nodes) {
+    const writeTo = (n.data.config as Record<string, unknown>).writeTo;
+    if (typeof writeTo === "string" && writeTo) names.add(writeTo);
+  }
+  return [...names].map((name) => ({ name, type: "any", reducer: "lastValue" }));
 }
