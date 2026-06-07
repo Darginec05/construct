@@ -31,6 +31,21 @@ export const PositionSchema = z.object({
 });
 export type Position = z.infer<typeof PositionSchema>;
 
+/**
+ * Safety class of a tool, lowest to highest risk. `read`/`content` fetch or
+ * inspect and may auto-run; `write`/`bulk`/`dangerous` mutate or destroy and
+ * should be gated behind a human approval. Lives here as the single source of
+ * truth shared by the DSL `tool` node and the `@construct/tools` contract.
+ */
+export const ToolTierSchema = z.enum([
+  "read",
+  "content",
+  "write",
+  "bulk",
+  "dangerous",
+]);
+export type ToolTier = z.infer<typeof ToolTierSchema>;
+
 /** Which model a node should call. `params` carries provider-specific extras. */
 export const ModelRefSchema = z.object({
   provider: z.string(),

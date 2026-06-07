@@ -4,6 +4,7 @@ import {
   ExprSchema,
   DataTypeSchema,
   ModelRefSchema,
+  ToolTierSchema,
 } from "./primitives.js";
 
 /**
@@ -167,7 +168,7 @@ const TransformConfig = z.object({
 const ToolConfig = z.object({
   tool: z.string(),
   args: z.record(ExprSchema).default({}),
-  tier: z.enum(["read", "content", "write", "bulk", "dangerous"]).optional(),
+  tier: ToolTierSchema.optional(),
   requiresApproval: z.boolean().default(false),
   resource: z.string().optional(),
   writeTo: z.string().optional(),

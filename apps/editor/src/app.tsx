@@ -12,7 +12,7 @@ export function App() {
 
   return (
     <FlowProvider>
-      <div className="grid h-full grid-rows-[52px_1fr]">
+      <div className="grid h-full grid-rows-[52px_minmax(0,1fr)]">
         <TopBar
           view={view}
           onViewChange={setView}
@@ -20,14 +20,14 @@ export function App() {
           onToggleRight={() => setRightCollapsed((c) => !c)}
         />
         <div
-          className="grid overflow-hidden"
+          className="grid min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden"
           style={{ gridTemplateColumns: `auto 1fr ${rightCollapsed ? "0px" : "380px"}` }}
         >
           <LeftDock />
-          <main className="overflow-hidden bg-canvas-bg">
+          <main className="min-h-0 overflow-hidden bg-canvas-bg">
             {view === "canvas" ? <Canvas /> : <ReaderView />}
           </main>
-          <aside className={`border-l border-border bg-card ${rightCollapsed ? "hidden" : ""}`}>
+          <aside className={`min-h-0 overflow-hidden border-l border-border bg-card ${rightCollapsed ? "hidden" : ""}`}>
             <RightDock />
           </aside>
         </div>

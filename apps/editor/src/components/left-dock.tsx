@@ -26,7 +26,7 @@ export function LeftDock() {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0">
       <div className="flex w-[52px] shrink-0 flex-col items-center gap-1 border-r border-border bg-card py-2">
         {RAIL.map((it) => {
           const Icon = it.icon;
@@ -60,7 +60,7 @@ export function LeftDock() {
       </div>
 
       {collapsed ? null : (
-        <div className="w-[272px] shrink-0 border-r border-border bg-card">
+        <div className="flex w-[272px] min-h-0 shrink-0 flex-col border-r border-border bg-card">
           {active === "nodes" ? (
             <NodeLibrary />
           ) : active === "outline" ? (

@@ -8,7 +8,7 @@ import {
   type ChatMessage,
   type ToolSpec,
 } from "@construct/providers";
-import { getTool } from "@construct/tools";
+import { getTool, runTool } from "@construct/tools";
 import { getStore } from "@construct/rag";
 
 /**
@@ -103,22 +103,26 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
     pendingTools = true;
 
     messages.push({ role: "assistant", content: res.text, toolCalls: res.toolCalls });
+    // A bad tool name or a throwing tool is the model's problem, not the run's:
+    // feed the error back as a `tool` message so the loop can recover, rather
+    // than aborting the whole flow.
     const results = await Promise.all(
       res.toolCalls.map(async (call) => {
         const impl = getTool(call.name);
         if (!impl) {
-          throw new Error(`agent node: model called unknown tool "${call.name}"`);
+          return { call, content: `Error: unknown tool "${call.name}"` };
         }
-        const out = await impl.run(call.arguments);
-        return { call, out };
+        const result = await runTool(impl, call.arguments);
+        const content = result.ok
+          ? typeof result.output === "string"
+            ? result.output
+            : JSON.stringify(result.output)
+          : `Error: ${result.error}`;
+        return { call, content };
       }),
     );
-    for (const { call, out } of results) {
-      messages.push({
-        role: "tool",
-        toolCallId: call.id,
-        content: typeof out === "string" ? out : JSON.stringify(out),
-      });
+    for (const { call, content } of results) {
+      messages.push({ role: "tool", toolCallId: call.id, content });
     }
   }
   if (pendingTools) {

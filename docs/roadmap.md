@@ -10,7 +10,7 @@ An honest snapshot of every package. ✅ implemented · 🚧 partial · 📋 pla
 | `@construct/engine` | ✅ | Worklist runner: channels/reducers, expressions, branch/switch, OR-join + `join`, bounded `loop`, fan-out `map`, `subflow`, human pauses. Ships `transform` + `code`. |
 | `@construct/nodes` | ✅ | `agent` (tool-use loop), `classifier`, `tool`, `retrieve` executors. |
 | `@construct/providers` | ✅ | Anthropic, OpenAI, Gemini, Fake; neutral chat + tool-call interface. |
-| `@construct/tools` | 🚧 | `Tool` contract + registry only. No built-in tools, no intrinsic `tier`, no `defineTool` yet. |
+| `@construct/tools` | ✅ | `Tool` contract (intrinsic `tier` + `requiresApproval`), registry, `defineTool(zod)` with a Zod→JSON Schema converter, graceful `runTool` (error + timeout), opt-in built-ins (`time_now`, `http_fetch`). |
 | `@construct/rag` | 🚧 | `VectorStore` contract, name registry, naive `chunkText`, in-memory store. No embeddings/persistent adapters. |
 | `@construct/sdk` | ✅ | Thin `ConstructClient.run` → `POST /v1/runs` (needs the server endpoint live). |
 | `@construct/server` | 🚧 | `handleRun` only. No HTTP/WS framework, no persistence, no pause resumption. |
@@ -20,11 +20,12 @@ An honest snapshot of every package. ✅ implemented · 🚧 partial · 📋 pla
 
 ## Near-term priorities
 
-1. **`tools` hardening** — add intrinsic `tier` to `Tool`, `defineTool(zod)`,
-   and a tiny safe built-in set. Prerequisite for safely mounting MCP.
-   See [tools-integrations-mcp.md](./tools-integrations-mcp.md).
+1. **Tier enforcement** — `Tool.tier`/`requiresApproval` are declared but inert;
+   the agent loop runs any registered tool. Wire write/bulk/dangerous through a
+   human-approval gate. Safety prerequisite for mounting MCP.
 2. **MCP client** — one adapter unlocks the whole MCP ecosystem; default
    unmapped tools to a conservative tier.
+   See [tools-integrations-mcp.md](./tools-integrations-mcp.md).
 3. **Editor Run + trace** — decide in-browser engine vs server via the SDK;
    `toDslFlow` already serializes the graph.
 4. **Server** — pick the HTTP/WS framework, add persistence, and implement
