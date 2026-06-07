@@ -12,17 +12,31 @@
     }
   },
   "files": ["dist"],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "construct-server": "./dist/server.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
+    "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
     "@construct/dsl": "*",
-    "@construct/engine": "*"
+    "@construct/engine": "*",
+    "@construct/nodes": "*",
+    "@construct/providers": "*",
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
   }
 }

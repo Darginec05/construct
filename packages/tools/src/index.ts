@@ -8,9 +8,8 @@ import { toJsonSchema } from "./schema.js";
  * `tier` declares the intrinsic safety class of the tool (see {@link ToolTier});
  * `requiresApproval` lets a tool force a gate regardless of tier. {@link
  * needsApproval} turns these into a yes/no decision (read/content auto-run;
- * write/bulk/dangerous route through human approval), which the agent loop
- * enforces via the engine's approval callback. The standalone `tool` node is not
- * yet gated — author an explicit human-approve node before it.
+ * write/bulk/dangerous route through human approval), which both the agent loop
+ * and the standalone `tool` node enforce via the engine's approval callback.
  */
 export interface Tool<Input = unknown, Output = unknown> {
   name: string;

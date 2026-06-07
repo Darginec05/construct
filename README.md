@@ -11,6 +11,7 @@
 Deep multi-agent orchestration with a great visual UX — author, run, and self-host
 the whole thing from one repo.
 
+[![CI](https://github.com/Darginec05/construct/actions/workflows/ci.yml/badge.svg)](https://github.com/Darginec05/construct/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-43853d.svg)](.nvmrc)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-22e06b.svg)](CONTRIBUTING.md)

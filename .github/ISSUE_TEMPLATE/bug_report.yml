@@ -1,0 +1,64 @@
+name: Bug report
+description: Report something that isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! A minimal reproduction — ideally the
+        serialized DSL flow that triggers it — helps us fix things much faster.
+  - type: dropdown
+    id: package
+    attributes:
+      label: Affected package
+      description: Which part of the stack is involved?
+      options:
+        - "@construct/dsl"
+        - "@construct/engine"
+        - "@construct/nodes"
+        - "@construct/providers"
+        - "@construct/tools"
+        - "@construct/rag"
+        - "@construct/sdk"
+        - "@construct/server"
+        - "apps/editor"
+        - "Not sure / other"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, what you expected, and what occurred instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Steps, code, or a minimal serialized DSL `Flow` that reproduces the issue.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node version
+      placeholder: "e.g. 20.11.0"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS / browser
+      placeholder: "e.g. macOS 14, Chrome 124"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or RunEvents
+      description: Paste any error output or emitted `RunEvent`s. Will be auto-formatted as code.
+      render: shell
+    validations:
+      required: false

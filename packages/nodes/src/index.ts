@@ -193,8 +193,21 @@ async function tool(ctx: ExecutorContext): Promise<ExecutorResult> {
   const impl = getTool(name);
   if (!impl) throw new Error(`tool node: no tool registered as "${name}"`);
   const args = ctx.evaluate(ctx.config.args ?? {});
-  const result = await impl.run(args);
-  return patch(ctx.config.writeTo, result);
+  // Gated tools (write/bulk/dangerous or requiresApproval) need explicit human
+  // approval. Unlike the agent loop there's no model to recover from a denial,
+  // so fail the node — fail safe by denying when no approver is wired.
+  if (needsApproval(impl)) {
+    const decision = ctx.requestApproval
+      ? await ctx.requestApproval({ tool: impl.name, tier: impl.tier, args })
+      : { approved: false, reason: "no approver configured" };
+    if (!decision.approved) {
+      const why = decision.reason ? ` (${decision.reason})` : "";
+      throw new Error(`tool node: "${impl.name}" was not approved${why}`);
+    }
+  }
+  const result = await runTool(impl, args);
+  if (!result.ok) throw new Error(`tool node: "${impl.name}" failed: ${result.error}`);
+  return patch(ctx.config.writeTo, result.output);
 }
 
 /** `retrieve`: query a registered vector store and write back the matches. */

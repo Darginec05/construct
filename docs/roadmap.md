@@ -8,7 +8,7 @@ An honest snapshot of every package. ✅ implemented · 🚧 partial · 📋 pla
 |---------|--------|-----------------|
 | `@construct/dsl` | ✅ | Full Flow/primitive/node schemas, 15 built-in node specs, `validateFlow`, `resolveNodeOutputs`. `SCHEMA_VERSION = 1`. |
 | `@construct/engine` | ✅ | Worklist runner: channels/reducers, expressions, branch/switch, OR-join + `join`, bounded `loop`, fan-out `map`, `subflow`, human pauses, inline tool-approval callback. Ships `transform` + `code`. |
-| `@construct/nodes` | ✅ | `agent` (tool-use loop with tier-gated tools), `classifier`, `tool`, `retrieve` executors. |
+| `@construct/nodes` | ✅ | `agent` (tool-use loop with tier-gated tools), `classifier`, `tool` (tier-gated), `retrieve` executors. |
 | `@construct/providers` | ✅ | Anthropic, OpenAI, Gemini, Fake; neutral chat + tool-call interface. |
 | `@construct/tools` | ✅ | `Tool` contract (intrinsic `tier` + `requiresApproval`), registry, `defineTool(zod)` with a Zod→JSON Schema converter, graceful `runTool` (error + timeout), opt-in built-ins (`time_now`, `http_fetch`). |
 | `@construct/rag` | 🚧 | `VectorStore` contract, name registry, naive `chunkText`, in-memory store. No embeddings/persistent adapters. |
@@ -20,11 +20,11 @@ An honest snapshot of every package. ✅ implemented · 🚧 partial · 📋 pla
 
 ## Near-term priorities
 
-1. **Tier enforcement** — 🚧 the agent loop now gates write/bulk/dangerous (and
-   `requiresApproval`) tools through the engine's `onToolApproval` callback,
-   failing safe (deny) when no approver is wired. Remaining: gate the standalone
-   `tool` node, and durable pause/resume of an agent mid-loop (today approval is
-   resolved inline, like `onHuman`). Safety prerequisite for mounting MCP.
+1. **Tier enforcement** — 🚧 both the agent loop and the standalone `tool` node
+   gate write/bulk/dangerous (and `requiresApproval`) tools through the engine's
+   `onToolApproval` callback, failing safe (deny) when no approver is wired.
+   Remaining: durable pause/resume of an agent mid-loop (today approval is
+   resolved inline, like `onHuman`).
 2. **MCP client** — ✅ `@construct/mcp` adapts any MCP server's tools into the
    registry, defaulting unmapped tools to a conservative tier so they can't
    auto-run. See [tools-integrations-mcp.md](./tools-integrations-mcp.md).
