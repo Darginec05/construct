@@ -25,8 +25,8 @@ const segCls = (active: boolean) =>
 const iconBtn =
   "flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground";
 
-const stubBtn =
-  "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-muted-foreground opacity-50 cursor-not-allowed";
+const histBtn =
+  "flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
 
 export function TopBar({
   view,
@@ -40,7 +40,17 @@ export function TopBar({
   onToggleRight: () => void;
 }) {
   const { theme, toggle } = useTheme();
-  const { activeFlow, activeFlowId, renameFlow, runStatus, runActiveFlow } = useFlow();
+  const {
+    activeFlow,
+    activeFlowId,
+    renameFlow,
+    runStatus,
+    runActiveFlow,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = useFlow();
 
   const { errors, warnings } = useMemo(() => {
     const issues = validateFlow(toDslFlow(activeFlow));
@@ -86,10 +96,22 @@ export function TopBar({
       <div className="ml-auto flex items-center gap-1.5">
         <ValidationPill errors={errors} warnings={warnings} />
 
-        <button type="button" className={`${stubBtn}`} disabled title="Not wired yet">
+        <button
+          type="button"
+          onClick={undo}
+          disabled={!canUndo}
+          title="Undo (⌘Z)"
+          className={histBtn}
+        >
           <Undo2 size={16} />
         </button>
-        <button type="button" className={`${stubBtn}`} disabled title="Not wired yet">
+        <button
+          type="button"
+          onClick={redo}
+          disabled={!canRedo}
+          title="Redo (⇧⌘Z)"
+          className={histBtn}
+        >
           <Redo2 size={16} />
         </button>
 
