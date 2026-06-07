@@ -61,6 +61,7 @@ interface FlowStore {
   activeFlow: FlowDoc;
   activeFlowId: string;
   setActiveFlowId: (id: string) => void;
+  renameFlow: (id: string, name: string) => void;
   nodes: FlowNode[];
   edges: Edge[];
   onNodesChange: OnNodesChange;
@@ -127,6 +128,10 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     setSelectedId(null);
   }, []);
 
+  const renameFlow = useCallback((id: string, name: string) => {
+    setById((m) => (m[id] ? { ...m, [id]: { ...m[id]!, name } } : m));
+  }, []);
+
   const flows = useMemo(() => order.map((id) => byId[id]!), [order, byId]);
   const selectedNode = useMemo(
     () => activeFlow.nodes.find((n) => n.id === selectedId) ?? null,
@@ -139,6 +144,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       activeFlow,
       activeFlowId,
       setActiveFlowId,
+      renameFlow,
       nodes: activeFlow.nodes,
       edges: activeFlow.edges,
       onNodesChange,
@@ -155,6 +161,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       activeFlow,
       activeFlowId,
       setActiveFlowId,
+      renameFlow,
       onNodesChange,
       onEdgesChange,
       setNodes,

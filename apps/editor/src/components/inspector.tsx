@@ -1,128 +1,40 @@
-import { useState } from "react";
-import { catalogEntry } from "../lib/catalog.ts";
+import { CATEGORY_META, catalogEntry } from "../lib/catalog.ts";
+import { EXPR_PLACEHOLDER, GENERIC_HINTS, fieldLabel } from "../lib/labels.ts";
 import { describeSchema, type FieldSpec } from "../lib/zod-introspect.ts";
 import { useFlow } from "../flow/flow-context.tsx";
+import { FieldControl, type FlowRef } from "./inspector-fields.tsx";
 
-const inputCls =
-  "w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring";
+/** Node-specific help, keyed by `${nodeType}.${fieldKey}`. Generic per-key help lives in labels.ts. */
+const HINTS: Record<string, string> = {
+  "agent.tools": "The model chooses among these at runtime.",
+  "agent.toolChoice": "auto calls tools as needed; required forces one; none disables.",
+  "agent.maxSteps": "Caps the tool-use loop before force-close.",
+  "agent.output": "text returns prose; structured forces a JSON schema.",
+  "classifier.classes": "Each class becomes an output handle.",
+  "switch.cases": "Each case becomes an output handle (plus default).",
+  "switch.on": EXPR_PLACEHOLDER,
+  "join.count": "Only used when mode is quorum.",
+  "tool.tier": "read/content auto-run; write/bulk/dangerous route through a Human node.",
+  "tool.requiresApproval": "Pause for a human before running.",
+  "tool.tool": "No tool registry in this build — enter the tool id.",
+  "human.exits": "Custom output handles; overrides the mode defaults.",
+  "human.mode": "Picks the pause type and its default output handles.",
+  "input.schema": "field → data type",
+  "output.from": "single returns one value; bundle returns a named record.",
+  "retrieve.store": "No store registry in this build — enter the store id.",
+  "code.ref": "Pair with Inline source — a code node needs one of the two.",
+  "code.inline": "Pair with Handler ref — a code node needs one of the two.",
+};
 
-interface FieldProps {
-  spec: FieldSpec;
-  value: unknown;
-  onChange: (value: unknown) => void;
-}
-
-function asText(v: unknown): string {
-  return typeof v === "string" ? v : v == null ? "" : String(v);
-}
-
-function JsonField({ spec, value, onChange }: FieldProps) {
-  const [text, setText] = useState(() => JSON.stringify(value ?? spec.default ?? null, null, 2));
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <div>
-      <textarea
-        rows={4}
-        value={text}
-        onChange={(e) => {
-          const next = e.target.value;
-          setText(next);
-          try {
-            onChange(JSON.parse(next));
-            setError(null);
-          } catch {
-            setError("invalid JSON");
-          }
-        }}
-        className={`${inputCls} font-mono`}
-        spellCheck={false}
-      />
-      {error ? <div className="mt-1 text-[11px] text-destructive">{error}</div> : null}
-    </div>
-  );
-}
-
-function Field({ spec, value, onChange }: FieldProps) {
-  switch (spec.kind) {
-    case "textarea":
-      return (
-        <textarea
-          rows={3}
-          value={asText(value ?? spec.default)}
-          onChange={(e) => onChange(e.target.value)}
-          className={inputCls}
-        />
-      );
-    case "number":
-      return (
-        <input
-          type="number"
-          value={asText(value ?? spec.default)}
-          onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
-          className={inputCls}
-        />
-      );
-    case "boolean":
-      return (
-        <label className="inline-flex items-center gap-2 text-[13px]">
-          <input
-            type="checkbox"
-            checked={Boolean(value ?? spec.default)}
-            onChange={(e) => onChange(e.target.checked)}
-          />
-          {Boolean(value ?? spec.default) ? "on" : "off"}
-        </label>
-      );
-    case "enum":
-      return (
-        <select
-          value={asText(value ?? spec.default)}
-          onChange={(e) => onChange(e.target.value)}
-          className={inputCls}
-        >
-          {spec.optional ? <option value="">—</option> : null}
-          {spec.options.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
-      );
-    case "string-list": {
-      const list = Array.isArray(value) ? (value as string[]) : ((spec.default as string[]) ?? []);
-      return (
-        <textarea
-          rows={3}
-          value={list.join("\n")}
-          onChange={(e) =>
-            onChange(
-              e.target.value
-                .split("\n")
-                .map((s) => s.trim())
-                .filter(Boolean),
-            )
-          }
-          placeholder="one per line"
-          className={inputCls}
-        />
-      );
-    }
-    case "json":
-      return <JsonField spec={spec} value={value} onChange={onChange} />;
-    default:
-      return (
-        <input
-          value={asText(value ?? spec.default)}
-          onChange={(e) => onChange(e.target.value)}
-          className={inputCls}
-        />
-      );
-  }
+function isEmpty(value: unknown): boolean {
+  if (value == null || value === "") return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === "object") return Object.keys(value as object).length === 0;
+  return false;
 }
 
 export function Inspector() {
-  const { selectedNode, updateNodeConfig } = useFlow();
+  const { selectedNode, updateNodeConfig, flows, activeFlowId } = useFlow();
 
   if (!selectedNode) {
     return (
@@ -132,15 +44,41 @@ export function Inspector() {
     );
   }
 
-  const entry = catalogEntry(selectedNode.data.type);
+  const type = selectedNode.data.type;
+  const entry = catalogEntry(type);
   const fields = entry ? describeSchema(entry.spec.configSchema) : [];
   const config = selectedNode.data.config;
+  const flowRefs: FlowRef[] = flows
+    .filter((f) => f.id !== activeFlowId)
+    .map((f) => ({ id: f.id, name: f.name }));
+
+  const Icon = entry?.icon;
+  const cat = entry ? CATEGORY_META[entry.category] : undefined;
 
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-4 py-3">
-        <div className="text-[13px] font-semibold">{entry?.label ?? selectedNode.data.type}</div>
-        <div className="font-mono text-[11px] text-muted-foreground">{selectedNode.id}</div>
+        <div className="flex items-center gap-2.5">
+          {Icon && cat ? (
+            <div
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white"
+              style={{ background: `hsl(var(${cat.hueVar}))` }}
+            >
+              <Icon size={17} />
+            </div>
+          ) : null}
+          <div className="min-w-0">
+            <div className="truncate text-[13px] font-semibold">{entry?.label ?? type}</div>
+            <div className="text-[11px] text-muted-foreground">
+              {cat ? `${cat.label} · ` : ""}
+              <span className="font-mono">{type}</span>
+            </div>
+          </div>
+        </div>
+        {entry?.description ? (
+          <div className="mt-2 text-[12px] leading-snug text-muted-foreground">{entry.description}</div>
+        ) : null}
+        <div className="mt-1.5 font-mono text-[10px] text-muted-foreground/70">{selectedNode.id}</div>
       </div>
       <div className="flex-1 space-y-3.5 overflow-y-auto p-4">
         {fields.length === 0 ? (
@@ -151,7 +89,9 @@ export function Inspector() {
               key={spec.key}
               spec={spec}
               value={config[spec.key]}
+              hint={HINTS[`${type}.${spec.key}`] ?? GENERIC_HINTS[spec.key]}
               nodeId={selectedNode.id}
+              flows={flowRefs}
               onUpdate={updateNodeConfig}
             />
           ))
@@ -164,21 +104,36 @@ export function Inspector() {
 function FieldRow({
   spec,
   value,
+  hint,
   nodeId,
+  flows,
   onUpdate,
 }: {
   spec: FieldSpec;
   value: unknown;
+  hint?: string;
   nodeId: string;
+  flows: FlowRef[];
   onUpdate: (id: string, patch: Record<string, unknown>) => void;
 }) {
+  const required = !spec.optional && isEmpty(value);
   return (
-    <label className="block">
-      <span className="mb-1 flex items-center gap-1.5 text-[12px] font-medium">
-        {spec.key}
-        {spec.optional ? <span className="text-[10px] text-muted-foreground">optional</span> : null}
-      </span>
-      <Field spec={spec} value={value} onChange={(v) => onUpdate(nodeId, { [spec.key]: v })} />
-    </label>
+    <div className="block">
+      <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium">
+        {fieldLabel(spec.key)}
+        {spec.optional ? (
+          <span className="text-[10px] font-normal text-muted-foreground">optional</span>
+        ) : required ? (
+          <span className="rounded bg-destructive/10 px-1 text-[10px] font-normal text-destructive">required</span>
+        ) : null}
+      </div>
+      <FieldControl
+        spec={spec}
+        value={value}
+        flows={flows}
+        onChange={(v) => onUpdate(nodeId, { [spec.key]: v })}
+      />
+      {hint ? <div className="mt-1 text-[11px] text-muted-foreground">{hint}</div> : null}
+    </div>
   );
 }
