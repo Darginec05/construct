@@ -1,5 +1,5 @@
 /**
- * construct — the fluent authoring SDK. A thin, typed layer over the
+ * @construct/sdk — the fluent authoring SDK. A thin, typed layer over the
  * @construct/dsl contract: declare channels/resources, place nodes by chaining,
  * and `toJSON()` to the exact `Flow` the visual editor stores (so code and canvas
  * round-trip), or `run()` to execute locally. It adds authoring ergonomics only

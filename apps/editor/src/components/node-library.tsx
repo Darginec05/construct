@@ -5,6 +5,7 @@ import {
   CATEGORY_ORDER,
   type CatalogEntry,
 } from "../lib/catalog.ts";
+import { Input } from "./ui/input.tsx";
 
 export const DND_TYPE = "application/construct-node";
 
@@ -32,11 +33,10 @@ export function NodeLibrary() {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border p-3">
-        <input
+        <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search nodes…"
-          className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring"
         />
       </div>
       <div className="flex-1 overflow-y-auto p-2">

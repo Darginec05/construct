@@ -1,15 +1,24 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import { X } from "lucide-react";
 import type { FieldSpec } from "../lib/zod-introspect.ts";
 import { EXPR_PLACEHOLDER, fieldLabel } from "../lib/labels.ts";
 import { modelPresets } from "../lib/model-presets.ts";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select.tsx";
+import { Switch } from "./ui/switch.tsx";
+import { Slider } from "./ui/slider.tsx";
+import { ToggleGroup, ToggleItem } from "./ui/toggle-group.tsx";
 
 /** Built-in provider ids (a ModelRef.model is a free string per provider). */
 const PROVIDERS = ["anthropic", "openai", "gemini", "fake"] as const;
 
 const inputCls =
   "w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring";
-const selectCls = `${inputCls} cursor-pointer`;
 
 export interface FlowRef {
   id: string;
@@ -41,44 +50,25 @@ export function PillSelect({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="flex flex-wrap gap-1 rounded-md border border-input bg-background p-1">
-      {options.map((o) => {
-        const on = value === o;
-        return (
-          <button
-            key={o}
-            type="button"
-            onClick={() => onChange(o)}
-            className={`rounded px-2 py-1 text-[12px] font-medium transition ${
-              on
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-            }`}
-          >
-            {o}
-          </button>
-        );
-      })}
-    </div>
+    <ToggleGroup
+      value={[value]}
+      // Single-select: ignore deselection (empty array) so a choice is always kept.
+      onValueChange={(next: string[]) => {
+        const v = next[0];
+        if (v) onChange(v);
+      }}
+    >
+      {options.map((o) => (
+        <ToggleItem key={o} value={o}>
+          {o}
+        </ToggleItem>
+      ))}
+    </ToggleGroup>
   );
 }
 
 export function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      onClick={() => onChange(!on)}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition ${on ? "bg-primary" : "bg-input"}`}
-    >
-      <span
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-background shadow transition-all ${
-          on ? "left-[18px]" : "left-0.5"
-        }`}
-      />
-    </button>
-  );
+  return <Switch checked={on} onCheckedChange={(checked: boolean) => onChange(checked)} />;
 }
 
 function TagListField({ value, onChange }: ControlProps) {
@@ -128,10 +118,16 @@ function TagListField({ value, onChange }: ControlProps) {
   );
 }
 
+// Sentinel option that switches the model picker to a free-text input — the
+// DSL's `ModelRef.model` is a free string, so any (e.g. newly shipped) id is valid.
+const CUSTOM_MODEL = "__custom__";
+
 function ModelField({ value, onChange }: ControlProps) {
   const v = asObject(value);
-  const listId = useId();
   const presets = modelPresets(v.provider);
+  const model = asText(v.model);
+  // Drop into free-text mode when the current id isn't a known preset.
+  const [custom, setCustom] = useState(model !== "" && !presets.includes(model));
   const temp = typeof v.temperature === "number" ? v.temperature : undefined;
   const set = (patch: Record<string, unknown>) => {
     const next = { ...v, ...patch };
@@ -139,6 +135,7 @@ function ModelField({ value, onChange }: ControlProps) {
     onChange(next);
   };
   const clamp = (n: number) => Math.min(2, Math.max(0, n));
+  const isCustom = custom || (model !== "" && !presets.includes(model));
   return (
     <div className="space-y-2 rounded-md border border-input bg-background p-2">
       <div>
@@ -147,19 +144,36 @@ function ModelField({ value, onChange }: ControlProps) {
       </div>
       <div>
         <div className="mb-1 text-[11px] text-muted-foreground">model</div>
-        <input
-          value={asText(v.model)}
-          onChange={(e) => set({ model: e.target.value })}
-          placeholder={presets.length ? `e.g. ${presets[0]}` : "model id"}
-          list={presets.length ? listId : undefined}
-          className={`${inputCls} font-mono`}
-        />
-        {presets.length ? (
-          <datalist id={listId}>
+        <Select
+          value={isCustom ? CUSTOM_MODEL : model || null}
+          onValueChange={(val: string | null) => {
+            if (val === CUSTOM_MODEL) setCustom(true);
+            else {
+              setCustom(false);
+              set({ model: val ?? undefined });
+            }
+          }}
+        >
+          <SelectTrigger className="font-mono">
+            <SelectValue placeholder="Select a model…" />
+          </SelectTrigger>
+          <SelectContent>
             {presets.map((m) => (
-              <option key={m} value={m} />
+              <SelectItem key={m} value={m} className="font-mono">
+                {m}
+              </SelectItem>
             ))}
-          </datalist>
+            <SelectItem value={CUSTOM_MODEL}>Custom…</SelectItem>
+          </SelectContent>
+        </Select>
+        {isCustom ? (
+          <input
+            value={model}
+            onChange={(e) => set({ model: e.target.value })}
+            placeholder="model id"
+            autoFocus
+            className={`${inputCls} mt-1.5 font-mono`}
+          />
         ) : null}
       </div>
       <div>
@@ -174,14 +188,14 @@ function ModelField({ value, onChange }: ControlProps) {
             ) : null}
           </span>
         </div>
-        <input
-          type="range"
+        <Slider
           min={0}
           max={2}
           step={0.1}
           value={temp ?? 1}
-          onChange={(e) => set({ temperature: clamp(Number(e.target.value)) })}
-          className="w-full accent-primary"
+          onValueChange={(val: number | readonly number[]) =>
+            set({ temperature: clamp(typeof val === "number" ? val : val[0]!) })
+          }
         />
       </div>
       <div>
@@ -253,17 +267,18 @@ function RecordField({ spec, value, onChange }: ControlProps) {
               className="w-1/3 rounded border border-input bg-background px-1.5 py-1 text-[12px] outline-none focus:ring-1 focus:ring-ring"
             />
             {spec.recordValue === "datatype" ? (
-              <select
-                value={asText(val)}
-                onChange={(e) => setVal(i, e.target.value)}
-                className="flex-1 cursor-pointer rounded border border-input bg-background px-1.5 py-1 text-[12px] outline-none focus:ring-1 focus:ring-ring"
-              >
-                {spec.options.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
+              <Select value={asText(val)} onValueChange={(o: string | null) => setVal(i, o ?? "")}>
+                <SelectTrigger className="flex-1 px-1.5 py-1 text-[12px]">
+                  <SelectValue placeholder="type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {spec.options.map((o) => (
+                    <SelectItem key={o} value={o}>
+                      {o}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : (
               <input
                 value={asText(val)}
@@ -323,15 +338,20 @@ function FlowRefField({ value, onChange, flows }: ControlProps) {
   const v = asText(value);
   const known = flows.some((f) => f.id === v);
   return (
-    <select value={v} onChange={(e) => onChange(e.target.value)} className={selectCls}>
-      <option value="">—</option>
-      {!known && v ? <option value={v}>{v}</option> : null}
-      {flows.map((f) => (
-        <option key={f.id} value={f.id}>
-          {f.name} · {f.id}
-        </option>
-      ))}
-    </select>
+    <Select value={v} onValueChange={(next: string | null) => onChange(next ?? "")}>
+      <SelectTrigger>
+        <SelectValue placeholder="—" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="">—</SelectItem>
+        {!known && v ? <SelectItem value={v}>{v}</SelectItem> : null}
+        {flows.map((f) => (
+          <SelectItem key={f.id} value={f.id}>
+            {f.name} · {f.id}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

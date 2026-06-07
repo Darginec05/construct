@@ -3,6 +3,7 @@ import { Box, Play, Sparkles, type LucideIcon } from "lucide-react";
 import { Copilot } from "./copilot.tsx";
 import { Inspector } from "./inspector.tsx";
 import { TestPanel } from "./test-panel.tsx";
+import { Tabs, TabsIndicator, TabsList, TabsPanel, TabsTab } from "./ui/tabs.tsx";
 import { useFlow } from "../flow/flow-context.tsx";
 
 type TabId = "copilot" | "test" | "inspector";
@@ -22,30 +23,33 @@ export function RightDock() {
   }, [selectedId]);
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex border-b border-border">
+    <Tabs
+      value={tab}
+      onValueChange={(value: string) => setTab(value as TabId)}
+      className="flex h-full flex-col"
+    >
+      <TabsList className="border-b border-border">
         {TABS.map((t) => {
           const Icon = t.icon;
-          const on = tab === t.id;
           return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 py-2.5 text-[12px] font-medium transition ${
-                on
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
+            <TabsTab key={t.id} value={t.id}>
               <Icon size={14} /> {t.label}
-            </button>
+            </TabsTab>
           );
         })}
-      </div>
+        <TabsIndicator />
+      </TabsList>
       <div className="min-h-0 flex-1">
-        {tab === "copilot" ? <Copilot /> : tab === "test" ? <TestPanel /> : <Inspector />}
+        <TabsPanel value="copilot">
+          <Copilot />
+        </TabsPanel>
+        <TabsPanel value="test">
+          <TestPanel />
+        </TabsPanel>
+        <TabsPanel value="inspector">
+          <Inspector />
+        </TabsPanel>
       </div>
-    </div>
+    </Tabs>
   );
 }

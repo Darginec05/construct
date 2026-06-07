@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { anthropic, defineFlow, defineTool } from "construct";
+import { anthropic, defineFlow, defineTool } from "@construct/sdk";
 import { genComponent } from "./gen-component.flow.js";
 
 /**
  * The Claude Design agent, authored with the fluent SDK:
  *   ground -> plan -> variant fan-out -> render -> critique -> (loop | pick).
- * `f.tpl` interpolates channel handles into the critic prompt; `gate.on("false")`
+ * `flow.tpl` interpolates channel handles into the critic prompt; `gate.on("false")`
  * forms the back-edge that re-enters the fan-out until the critic passes.
  */
 
@@ -22,18 +22,18 @@ export const figmaRender = defineTool({
   run: () => ({ url: "https://example.com/shot.png" }),
 });
 
-export const claudeDesign = defineFlow("claude-design", "Claude Design agent", (f) => {
-  const brief = f.text("brief");
-  const refs = f.image("refs", { reducer: "append" });
-  const tokens = f.json("tokens", TokensSchema);
-  const plan = f.json("plan", PlanSchema);
-  const candidates = f.json("candidates", CandidateSchema, { reducer: "append" });
-  const screenshot = f.image("screenshot");
-  const critique = f.json("critique", CritiqueSchema);
+export const claudeDesign = defineFlow("claude-design", "Claude Design agent", (flow) => {
+  const brief = flow.text("brief");
+  const refs = flow.image("refs", { reducer: "append" });
+  const tokens = flow.json("tokens", TokensSchema);
+  const plan = flow.json("plan", PlanSchema);
+  const candidates = flow.json("candidates", CandidateSchema, { reducer: "append" });
+  const screenshot = flow.image("screenshot");
+  const critique = flow.json("critique", CritiqueSchema);
 
-  const figma = f.resource("figma", "figma", { scope: "session" });
+  const figma = flow.resource("figma", "figma", { scope: "session" });
 
-  const start = f.input({ schema: { brief, refs } });
+  const start = flow.input({ schema: { brief, refs } });
 
   const variants = start
     .retrieve({ store: "design-system", query: brief, topK: 8, writeTo: tokens })
@@ -49,14 +49,14 @@ export const claudeDesign = defineFlow("claude-design", "Claude Design agent", (
     .tool(figmaRender, { args: { nodes: candidates }, resource: figma, writeTo: screenshot })
     .agent({
       model: anthropic("claude-sonnet-4-6"),
-      prompt: f.tpl`Critique ${screenshot} against ${tokens}`,
+      prompt: flow.tpl`Critique ${screenshot} against ${tokens}`,
       output: CritiqueSchema,
       writeTo: critique,
     })
     .branch({ condition: critique.path("pass") });
 
   gate.on("false").to(variants);
-  gate.on("true").human({ mode: "select" }).on("next").to(f.output(candidates));
+  gate.on("true").human({ mode: "select" }).on("next").to(flow.output(candidates));
 });
 
 console.log(JSON.stringify(claudeDesign.toJSON(), null, 2));

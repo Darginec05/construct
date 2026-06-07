@@ -16,13 +16,12 @@ import {
 import { toDslFlow } from "../flow/serialize.ts";
 import { type PublishStatus, useFlow } from "../flow/flow-context.tsx";
 import { useTheme } from "../lib/use-theme.ts";
+import { ToggleGroup, ToggleItem } from "./ui/toggle-group.tsx";
 
 export type ViewMode = "canvas" | "reader";
 
-const segCls = (active: boolean) =>
-  `flex items-center gap-1.5 rounded-md px-3 py-1 text-[12px] font-medium transition ${
-    active ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-  }`;
+const segItem =
+  "inline-flex items-center gap-1.5 rounded-md px-3 data-[pressed]:bg-card data-[pressed]:text-foreground data-[pressed]:shadow-sm data-[pressed]:hover:bg-card hover:bg-transparent";
 
 const iconBtn =
   "flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground";
@@ -90,14 +89,21 @@ export function TopBar({
         </span>
       </div>
 
-      <div className="ml-3 flex items-center gap-0.5 rounded-lg bg-secondary p-0.5">
-        <button type="button" className={segCls(view === "canvas")} onClick={() => onViewChange("canvas")}>
+      <ToggleGroup
+        value={[view]}
+        onValueChange={(next: string[]) => {
+          const v = next[0];
+          if (v) onViewChange(v as ViewMode);
+        }}
+        className="ml-3 rounded-lg border-0 bg-secondary p-0.5"
+      >
+        <ToggleItem value="canvas" className={segItem}>
           <Workflow size={13} /> Canvas
-        </button>
-        <button type="button" className={segCls(view === "reader")} onClick={() => onViewChange("reader")}>
+        </ToggleItem>
+        <ToggleItem value="reader" className={segItem}>
           <Layers size={13} /> Reader
-        </button>
-      </div>
+        </ToggleItem>
+      </ToggleGroup>
 
       <div className="ml-auto flex items-center gap-1.5">
         <ValidationPill errors={errors} warnings={warnings} />

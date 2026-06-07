@@ -19,16 +19,19 @@ export function App() {
           rightCollapsed={rightCollapsed}
           onToggleRight={() => setRightCollapsed((c) => !c)}
         />
-        <div
-          className="grid min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden"
-          style={{ gridTemplateColumns: `auto 1fr ${rightCollapsed ? "0px" : "380px"}` }}
-        >
+        <div className="flex min-h-0 overflow-hidden">
           <LeftDock />
-          <main className="min-h-0 overflow-hidden bg-canvas-bg">
+          <main className="min-h-0 flex-1 overflow-hidden bg-canvas-bg">
             {view === "canvas" ? <Canvas /> : <ReaderView />}
           </main>
-          <aside className={`min-h-0 overflow-hidden border-l border-border bg-card ${rightCollapsed ? "hidden" : ""}`}>
-            <RightDock />
+          <aside
+            className={`min-h-0 shrink-0 overflow-hidden bg-card transition-[width] duration-200 ease-in-out ${
+              rightCollapsed ? "w-0" : "w-[380px]"
+            }`}
+          >
+            <div className="h-full w-[380px] border-l border-border">
+              <RightDock />
+            </div>
           </aside>
         </div>
       </div>

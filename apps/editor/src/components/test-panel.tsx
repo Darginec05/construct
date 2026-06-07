@@ -1,5 +1,6 @@
 import { CircleDot, FlaskConical, Loader2, Play, Plus, Server } from "lucide-react";
 import { type RunMode, useFlow } from "../flow/flow-context.tsx";
+import { ToggleGroup, ToggleItem } from "./ui/toggle-group.tsx";
 
 const inputCls =
   "w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring";
@@ -130,34 +131,34 @@ function RunModeToggle({
   disabled: boolean;
   onChange: (mode: RunMode) => void;
 }) {
-  const seg = (active: boolean) =>
-    `flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium transition ${
-      active ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-    } disabled:pointer-events-none disabled:opacity-40`;
+  const seg =
+    "flex flex-1 items-center justify-center gap-1.5 rounded-md py-1 data-[pressed]:bg-card data-[pressed]:text-foreground data-[pressed]:shadow-sm data-[pressed]:hover:bg-card hover:bg-transparent";
   return (
-    <div className="flex items-center gap-0.5 rounded-lg bg-secondary p-0.5">
-      <button
-        type="button"
-        className={seg(mode === "sandbox")}
-        disabled={disabled}
-        onClick={() => onChange("sandbox")}
-      >
+    <ToggleGroup
+      value={[mode]}
+      disabled={disabled}
+      onValueChange={(next: string[]) => {
+        const v = next[0];
+        if (v) onChange(v as RunMode);
+      }}
+      className="w-full rounded-lg border-0 bg-secondary p-0.5"
+    >
+      <ToggleItem value="sandbox" className={seg}>
         <FlaskConical size={13} /> Sandbox
-      </button>
-      <button
-        type="button"
-        className={seg(mode === "server")}
-        disabled={disabled || !serverConfigured}
+      </ToggleItem>
+      <ToggleItem
+        value="server"
+        disabled={!serverConfigured}
         title={
           serverConfigured
             ? "Run on your self-host server with real providers"
             : "Set VITE_CONSTRUCT_SERVER_URL (apps/editor/.env) to run on a server"
         }
-        onClick={() => onChange("server")}
+        className={seg}
       >
         <Server size={13} /> Server
-      </button>
-    </div>
+      </ToggleItem>
+    </ToggleGroup>
   );
 }
 

@@ -149,7 +149,11 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
-  const [runMode, setRunMode] = useState<RunMode>("sandbox");
+  // Default to Server when one is configured, so a real run is the obvious path;
+  // Sandbox (fake echo, no keys) stays available as a deliberate choice.
+  const [runMode, setRunMode] = useState<RunMode>(
+    constructClient !== null ? "server" : "sandbox",
+  );
   const [nodeRun, setNodeRun] = useState<Record<string, NodeRunState>>({});
   const [trace, setTrace] = useState<RunEvent[]>([]);
   const [runOutput, setRunOutput] = useState<unknown>(undefined);
@@ -199,9 +203,6 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     },
     [snapshot],
   );
-
-  console.log("activeFlow", activeFlow);
-  console.log("runMode", runMode);
 
   const patchActive = useCallback(
     (fn: (f: FlowDoc) => FlowDoc) => {

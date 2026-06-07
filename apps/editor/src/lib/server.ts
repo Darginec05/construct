@@ -1,4 +1,4 @@
-import { ConstructClient } from "@construct/sdk";
+import { ConstructClient } from "@construct/client";
 
 /**
  * Self-host server connection, read from build-time Vite env. Publish targets
