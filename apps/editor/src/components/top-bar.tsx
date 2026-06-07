@@ -130,7 +130,8 @@ export function TopBar({
         <button
           type="button"
           disabled
-          title="Publish — backend not wired yet"
+          aria-disabled="true"
+          title="Publish needs the self-host server — persistence isn't wired yet"
           className="flex h-8 items-center rounded-md border border-border px-3 text-[12px] font-medium opacity-50"
         >
           Publish

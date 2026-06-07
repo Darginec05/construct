@@ -16,7 +16,7 @@ An honest snapshot of every package. ✅ implemented · 🚧 partial · 📋 pla
 | `@construct/server` | 🚧 | `handleRun` only. No HTTP/WS framework, no persistence, no pause resumption. |
 | `apps/editor` | 🚧 | Canvas, left/right docks, schema-driven inspector, reader view, live validation. Run / Undo / Publish / Copilot not wired. |
 | `@construct/integrations` | 📋 | Not started. Native connectors + Resource providers. |
-| `@construct/mcp` | 📋 | Not started. MCP client adapter, then MCP server. |
+| `@construct/mcp` | 🚧 | MCP **client**: `McpClient` mounts any server's tools into the registry (`inputSchema`→`parameters`), defaulting unclassified tools to `dangerous` + `requiresApproval` (overridable via `tierFor`). MCP **server** not started. |
 
 ## Near-term priorities
 
@@ -25,9 +25,9 @@ An honest snapshot of every package. ✅ implemented · 🚧 partial · 📋 pla
    failing safe (deny) when no approver is wired. Remaining: gate the standalone
    `tool` node, and durable pause/resume of an agent mid-loop (today approval is
    resolved inline, like `onHuman`). Safety prerequisite for mounting MCP.
-2. **MCP client** — one adapter unlocks the whole MCP ecosystem; default
-   unmapped tools to a conservative tier.
-   See [tools-integrations-mcp.md](./tools-integrations-mcp.md).
+2. **MCP client** — ✅ `@construct/mcp` adapts any MCP server's tools into the
+   registry, defaulting unmapped tools to a conservative tier so they can't
+   auto-run. See [tools-integrations-mcp.md](./tools-integrations-mcp.md).
 3. **Editor Run + trace** — decide in-browser engine vs server via the SDK;
    `toDslFlow` already serializes the graph.
 4. **Server** — pick the HTTP/WS framework, add persistence, and implement
