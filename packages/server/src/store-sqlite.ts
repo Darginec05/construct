@@ -1,7 +1,20 @@
 import { DatabaseSync } from "node:sqlite";
 import type { Flow } from "@construct/dsl";
 import type { RunStatus } from "@construct/engine";
-import type { RunRecord, SaveFlowInput, Store, StoredFlow } from "./store.js";
+import type {
+  ListOptions,
+  RunRecord,
+  SaveFlowInput,
+  Store,
+  StoredFlow,
+} from "./store.js";
+
+/** SQLite bind params for a window: `LIMIT -1` means unbounded. */
+function windowParams(opts?: ListOptions): [number, number] {
+  const limit = opts?.limit === undefined ? -1 : Math.max(0, opts.limit);
+  const offset = Math.max(0, opts?.offset ?? 0);
+  return [limit, offset];
+}
 
 interface FlowRow {
   id: string;
@@ -98,10 +111,10 @@ export class SqliteStore implements Store {
     return row ? this.toStoredFlow(row) : undefined;
   }
 
-  listFlows(): StoredFlow[] {
+  listFlows(opts?: ListOptions): StoredFlow[] {
     const rows = this.db
-      .prepare(`SELECT * FROM flows ORDER BY updated_at DESC`)
-      .all() as unknown as FlowRow[];
+      .prepare(`SELECT * FROM flows ORDER BY updated_at DESC LIMIT ? OFFSET ?`)
+      .all(...windowParams(opts)) as unknown as FlowRow[];
     return rows.map((r) => this.toStoredFlow(r));
   }
 
@@ -143,17 +156,20 @@ export class SqliteStore implements Store {
     return row ? this.toRunRecord(row) : undefined;
   }
 
-  listRuns(flowId?: string): RunRecord[] {
+  listRuns(flowId?: string, opts?: ListOptions): RunRecord[] {
+    const [limit, offset] = windowParams(opts);
     const rows = (
       flowId
         ? this.db
             .prepare(
-              `SELECT * FROM runs WHERE flow_id = ? ORDER BY created_at DESC`,
+              `SELECT * FROM runs WHERE flow_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
             )
-            .all(flowId)
+            .all(flowId, limit, offset)
         : this.db
-            .prepare(`SELECT * FROM runs ORDER BY created_at DESC`)
-            .all()
+            .prepare(
+              `SELECT * FROM runs ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+            )
+            .all(limit, offset)
     ) as unknown as RunRow[];
     return rows.map((r) => this.toRunRecord(r));
   }

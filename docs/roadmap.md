@@ -12,9 +12,9 @@ An honest snapshot of every package. ✅ implemented · 🚧 partial · 📋 pla
 | `@construct/providers` | ✅ | Anthropic, OpenAI, Gemini, Fake; neutral chat + tool-call interface. |
 | `@construct/tools` | ✅ | `Tool` contract (intrinsic `tier` + `requiresApproval`), registry, `defineTool(zod)` with a Zod→JSON Schema converter, graceful `runTool` (error + timeout), opt-in built-ins (`time_now`, `http_fetch`). |
 | `@construct/rag` | 🚧 | `VectorStore` contract, name registry, naive `chunkText`, in-memory store. No embeddings/persistent adapters. |
-| `@construct/sdk` | ✅ | Thin `ConstructClient.run` → `POST /v1/runs` (needs the server endpoint live). |
-| `@construct/server` | 🚧 | `handleRun` only. No HTTP/WS framework, no persistence, no pause resumption. |
-| `apps/editor` | 🚧 | Canvas, left/right docks, schema-driven inspector, reader view, live validation. Run / Undo / Publish / Copilot not wired. |
+| `@construct/sdk` | ✅ | Thin `ConstructClient`: `run` → `POST /v1/runs`, `saveFlow` → `POST /v1/flows` (upsert by id). |
+| `@construct/server` | 🚧 | Hono REST API: flow CRUD, `POST /v1/runs` (JSON + SSE), run history; `Store` with memory + `node:sqlite` adapters; lazy provider registration; optional Bearer auth. No durable human-pause resume. |
+| `apps/editor` | 🚧 | Canvas, left/right docks, schema-driven inspector, reader view, live validation, Run + trace, Undo/Redo, Publish (→ `@construct/server` via `VITE_CONSTRUCT_SERVER_URL`). Copilot out of scope (cloud). |
 | `@construct/integrations` | 📋 | Not started. Native connectors + Resource providers. |
 | `@construct/mcp` | 🚧 | MCP **client**: `McpClient` mounts any server's tools into the registry (`inputSchema`→`parameters`), defaulting unclassified tools to `dangerous` + `requiresApproval` (overridable via `tierFor`). MCP **server** not started. |
 
@@ -30,8 +30,9 @@ An honest snapshot of every package. ✅ implemented · 🚧 partial · 📋 pla
    auto-run. See [tools-integrations-mcp.md](./tools-integrations-mcp.md).
 3. **Editor Run + trace** — decide in-browser engine vs server via the SDK;
    `toDslFlow` already serializes the graph.
-4. **Server** — pick the HTTP/WS framework, add persistence, and implement
-   durable human-pause resume.
+4. **Server** — ✅ Hono REST API with flow CRUD, runs (JSON + SSE), and a
+   `Store` (memory + `node:sqlite`). Remaining: durable human-pause resume
+   (blocked on engine state snapshots) and wiring the editor's Publish to it.
 5. **RAG** — embedding pipeline + a persistent vector adapter.
 
 ## Larger bets

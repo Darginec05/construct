@@ -124,4 +124,34 @@ describe("construct-server", () => {
     });
     expect(allowed.status).toBe(200);
   });
+
+  it("windows the flows list with limit and offset", async () => {
+    for (let i = 0; i < 5; i++) {
+      await app.request("/v1/flows", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ flow: { ...echoFlow(), id: `f${i}` } }),
+      });
+    }
+
+    const page = (await (
+      await app.request("/v1/flows?limit=2&offset=1")
+    ).json()) as { flows: unknown[] };
+    expect(page.flows).toHaveLength(2);
+
+    const all = (await (await app.request("/v1/flows")).json()) as {
+      flows: unknown[];
+    };
+    expect(all.flows).toHaveLength(5);
+  });
+
+  it("rejects a body over the configured limit with 413", async () => {
+    const tiny = createApp({ store, maxBodyBytes: 64 });
+    const res = await tiny.request("/v1/flows", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "x".repeat(500), flow: echoFlow() }),
+    });
+    expect(res.status).toBe(413);
+  });
 });

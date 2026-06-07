@@ -45,8 +45,10 @@ Tabbed **Copilot / Test / Inspector**, auto-switching to Inspector on selection.
   `loop`/`map`/`subflow` references, and monospace expression fields. Labels are
   humanized, required-empty fields are flagged, and each field carries help
   text. Complex/unknown types fall back to a safe JSON editor.
-- **Test** 🚧 — a real input form derived from the `input` node's `schema`.
-  The **Run** button is disabled pending the runtime wiring.
+- **Test** ✅ — a real input form derived from the `input` node's `schema`. The
+  **Run** button executes the flow in an **in-browser sandbox** (`@construct/engine`
+  with a fake echo provider for every model id — no keys, no API calls), streams a
+  node-by-node trace, and shows the output. Per-node run state lights up on canvas.
 - **Copilot** 🚧 — an honest disconnected shell. It does not fake AI edits; it
   explains that the copilot is out of scope for the OSS editor. Markdown is
   rendered XSS-safely (no `dangerouslySetInnerHTML`).
@@ -54,15 +56,21 @@ Tabbed **Copilot / Test / Inspector**, auto-switching to Inspector on selection.
 ## Serialization & validation
 
 `toDslFlow(doc)` maps the editor's multi-flow store to a DSL `Flow` — reused for
-the live validation pill (`validateFlow`), and the basis for Run and persistence
-when those land.
+the live validation pill (`validateFlow`), the in-browser sandbox Run, and
+Publish (each workspace flow is sent to the server).
 
-## Status / not yet wired
+## Status
 
-- 📋 **Run + run-trace** — needs a runtime decision (in-browser engine vs
-  `@construct/sdk` against a server). `toDslFlow` is ready for it.
-- 📋 **Undo/Redo** — history stack over the flow doc (top-bar buttons stubbed).
-- 📋 **Publish** — needs a backend/persistence target.
+- ✅ **Run + run-trace** — in-browser sandbox via `@construct/engine` + fake
+  provider; live node states and an event trace.
+- ✅ **Undo/Redo** — history stack over the flow doc (⌘Z / ⇧⌘Z + toolbar),
+  coalescing rapid edits (typing, dragging).
+- ✅ **Publish** — sends every workspace flow to a self-host `@construct/server`
+  via `@construct/sdk` (`POST /v1/flows`, upsert by id). The target is read from
+  build-time env (`VITE_CONSTRUCT_SERVER_URL`, optional `VITE_CONSTRUCT_API_KEY`
+  — see [`apps/editor/.env.example`](../apps/editor/.env.example)); when unset,
+  the button is disabled with an honest tooltip and the editor stays a pure
+  sandbox.
 - 📋 **Copilot** — out of scope for this repo (see
   [architecture.md](./architecture.md#scope)).
 

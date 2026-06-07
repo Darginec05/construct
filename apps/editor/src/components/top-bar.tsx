@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { validateFlow } from "@construct/dsl";
 import {
+  Check,
   Layers,
   Loader2,
   Moon,
@@ -9,10 +10,11 @@ import {
   Redo2,
   Sun,
   Undo2,
+  UploadCloud,
   Workflow,
 } from "lucide-react";
 import { toDslFlow } from "../flow/serialize.ts";
-import { useFlow } from "../flow/flow-context.tsx";
+import { type PublishStatus, useFlow } from "../flow/flow-context.tsx";
 import { useTheme } from "../lib/use-theme.ts";
 
 export type ViewMode = "canvas" | "reader";
@@ -50,6 +52,10 @@ export function TopBar({
     redo,
     canUndo,
     canRedo,
+    serverConfigured,
+    publishStatus,
+    publishError,
+    publishWorkspace,
   } = useFlow();
 
   const { errors, warnings } = useMemo(() => {
@@ -127,15 +133,13 @@ export function TopBar({
           {running ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
           {running ? "Running…" : "Run"}
         </button>
-        <button
-          type="button"
-          disabled
-          aria-disabled="true"
-          title="Publish needs the self-host server — persistence isn't wired yet"
-          className="flex h-8 items-center rounded-md border border-border px-3 text-[12px] font-medium opacity-50"
-        >
-          Publish
-        </button>
+        <PublishButton
+          serverConfigured={serverConfigured}
+          status={publishStatus}
+          error={publishError}
+          hasErrors={errors > 0}
+          onPublish={publishWorkspace}
+        />
 
         <button type="button" onClick={onToggleRight} aria-label="Toggle inspector" className={iconBtn} title="Toggle inspector">
           <PanelRight size={17} className={rightCollapsed ? "opacity-60" : ""} />
@@ -145,6 +149,65 @@ export function TopBar({
         </button>
       </div>
     </header>
+  );
+}
+
+function PublishButton({
+  serverConfigured,
+  status,
+  error,
+  hasErrors,
+  onPublish,
+}: {
+  serverConfigured: boolean;
+  status: PublishStatus;
+  error: string | null;
+  hasErrors: boolean;
+  onPublish: () => void;
+}) {
+  const publishing = status === "publishing";
+
+  if (!serverConfigured) {
+    return (
+      <button
+        type="button"
+        disabled
+        aria-disabled="true"
+        title="Set VITE_CONSTRUCT_SERVER_URL (apps/editor/.env) to publish to your self-host server"
+        className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-[12px] font-medium opacity-50"
+      >
+        <UploadCloud size={14} /> Publish
+      </button>
+    );
+  }
+
+  const title = hasErrors
+    ? "Fix validation errors to publish"
+    : status === "error" && error
+      ? error
+      : "Publish the workspace to your self-host server";
+
+  return (
+    <button
+      type="button"
+      onClick={onPublish}
+      disabled={publishing || hasErrors}
+      title={title}
+      className={`flex h-8 items-center gap-1.5 rounded-md border px-3 text-[12px] font-medium transition hover:bg-accent disabled:opacity-50 ${
+        status === "error"
+          ? "border-destructive/40 text-destructive"
+          : "border-border"
+      }`}
+    >
+      {publishing ? (
+        <Loader2 size={14} className="animate-spin" />
+      ) : status === "done" ? (
+        <Check size={14} className="text-[hsl(var(--cat-tool))]" />
+      ) : (
+        <UploadCloud size={14} />
+      )}
+      {publishing ? "Publishing…" : status === "done" ? "Published" : "Publish"}
+    </button>
   );
 }
 

@@ -11,7 +11,13 @@ export interface StoredFlow {
   updatedAt: number;
 }
 
-/** A single execution of a flow, persisted after it finishes (or pauses). */
+/**
+ * A single execution of a flow, persisted after it finishes (or pauses).
+ *
+ * `pause` is recorded when a run stops at a `human` node, but the OSS server has
+ * no resume endpoint yet (it needs engine state snapshots), so a paused run is
+ * currently a terminal record — informational, not resumable.
+ */
 export interface RunRecord {
   id: string;
   flowId: string;
@@ -34,6 +40,16 @@ export interface SaveFlowInput {
 }
 
 /**
+ * Window into a list query. Omit `limit` to return every row (used internally,
+ * e.g. to expose all flows as possible subflows); the HTTP routes always pass a
+ * bounded `limit` so an endpoint can never serialize unbounded history.
+ */
+export interface ListOptions {
+  limit?: number;
+  offset?: number;
+}
+
+/**
  * Persistence boundary for the self-host server. Both adapters (in-memory and
  * `node:sqlite`) are synchronous, so the interface is too — flows are small and
  * the reference server is single-process. A multi-tenant cloud control plane
@@ -42,11 +58,14 @@ export interface SaveFlowInput {
 export interface Store {
   saveFlow(input: SaveFlowInput): StoredFlow;
   getFlow(id: string): StoredFlow | undefined;
-  listFlows(): StoredFlow[];
+  listFlows(opts?: ListOptions): StoredFlow[];
   deleteFlow(id: string): boolean;
 
   saveRun(record: RunRecord): void;
   getRun(id: string): RunRecord | undefined;
-  /** Most-recent-first; optionally scoped to one flow. */
-  listRuns(flowId?: string): RunRecord[];
+  /** Most-recent-first; optionally scoped to one flow and/or windowed. */
+  listRuns(flowId?: string, opts?: ListOptions): RunRecord[];
+
+  /** Release underlying resources (e.g. close the SQLite handle). */
+  close?(): void;
 }

@@ -19,6 +19,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "smoke": "tsc -p tsconfig.json && tsc -p tsconfig.examples.json && node examples-dist/smoke.js",
+    "example:mcp": "tsc -p tsconfig.json && tsc -p tsconfig.examples.json && node examples-dist/mcp-flow.js",
     "clean": "rm -rf dist examples-dist .turbo"
   },
   "dependencies": {
@@ -29,7 +30,10 @@
     "@construct/tools": "*"
   },
   "devDependencies": {
+    "@construct/mcp": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "zod": "^3.25.76"
   }
 }

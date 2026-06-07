@@ -9,6 +9,8 @@ import {
 } from "reactflow";
 import type { RunEvent } from "@construct/engine";
 import { executeFlow } from "../lib/runtime.ts";
+import { constructClient } from "../lib/server.ts";
+import { toDslFlow } from "./serialize.ts";
 import type { ConstructNodeData } from "./construct-node.tsx";
 
 export type FlowNode = Node<ConstructNodeData>;
@@ -16,6 +18,7 @@ export type FlowKind = "main" | "sub";
 
 export type RunStatus = "idle" | "running" | "completed" | "paused" | "failed";
 export type NodeRunState = "running" | "done" | "error";
+export type PublishStatus = "idle" | "publishing" | "done" | "error";
 
 export interface FlowDoc {
   id: string;
@@ -123,6 +126,11 @@ interface FlowStore {
   setInputValue: (key: string, value: string) => void;
   runActiveFlow: () => Promise<void>;
   clearRun: () => void;
+  // --- publish to a self-host server ---
+  serverConfigured: boolean;
+  publishStatus: PublishStatus;
+  publishError: string | null;
+  publishWorkspace: () => Promise<void>;
 }
 
 const FlowCtx = createContext<FlowStore | null>(null);
@@ -142,6 +150,9 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   const [runOutput, setRunOutput] = useState<unknown>(undefined);
   const [runError, setRunError] = useState<string | null>(null);
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
+
+  const [publishStatus, setPublishStatus] = useState<PublishStatus>("idle");
+  const [publishError, setPublishError] = useState<string | null>(null);
 
   const activeFlow = byId[activeFlowId]!;
 
@@ -330,6 +341,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const result = await executeFlow(activeFlow, flows, input, (event) => {
+        console.log("runActiveFlow event", event);
+
         setTrace((t) => [...t, event]);
         if (event.nodeId == null) return;
         const id = event.nodeId;
@@ -337,12 +350,32 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
         else if (event.type === "node-finish") setNodeRun((m) => ({ ...m, [id]: "done" }));
         else if (event.type === "error") setNodeRun((m) => ({ ...m, [id]: "error" }));
       });
+
+      console.log("runActiveFlow result", result);
+
       setRunStatus(result.status);
       setRunOutput(result.output);
       setRunError(result.error ?? null);
     } catch (err) {
       setRunStatus("failed");
       setRunError(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const publishWorkspace = useCallback(async () => {
+    if (!constructClient) return;
+    const { flows } = snapRef.current;
+    setPublishStatus("publishing");
+    setPublishError(null);
+    try {
+      // Push every flow in the workspace so referenced subflows land too.
+      for (const f of flows) {
+        await constructClient.saveFlow(toDslFlow(f), { id: f.id, name: f.name });
+      }
+      setPublishStatus("done");
+    } catch (err) {
+      setPublishStatus("error");
+      setPublishError(err instanceof Error ? err.message : String(err));
     }
   }, []);
 
@@ -376,6 +409,10 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       setInputValue,
       runActiveFlow,
       clearRun,
+      serverConfigured: constructClient != null,
+      publishStatus,
+      publishError,
+      publishWorkspace,
     }),
     [
       flows,
@@ -402,6 +439,9 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       setInputValue,
       runActiveFlow,
       clearRun,
+      publishStatus,
+      publishError,
+      publishWorkspace,
     ],
   );
 

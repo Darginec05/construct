@@ -17,6 +17,13 @@ export interface ExecuteRunInput {
  * target either from the store (`flowId`) or from an inline document (`flow`),
  * exposes every stored flow as a possible subflow body, and writes the outcome
  * back through the store before returning.
+ *
+ * Two safety limitations of the OSS server, both pending durable resume:
+ *  - No tool-approval surface is wired, so the engine receives no approver:
+ *    gated tools (write/bulk/dangerous or `requiresApproval`) fail safe — they
+ *    are denied, never silently run. A flow needing them will fail here.
+ *  - A run that pauses at a `human` node is persisted with its `pause` info but
+ *    cannot be resumed yet; treat such records as terminal.
  */
 export async function executeRun(
   store: Store,

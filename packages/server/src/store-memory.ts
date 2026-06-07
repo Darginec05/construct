@@ -1,4 +1,17 @@
-import type { RunRecord, SaveFlowInput, Store, StoredFlow } from "./store.js";
+import type {
+  ListOptions,
+  RunRecord,
+  SaveFlowInput,
+  Store,
+  StoredFlow,
+} from "./store.js";
+
+/** Apply an optional offset/limit window to an already-sorted array. */
+function window<T>(rows: T[], opts?: ListOptions): T[] {
+  const offset = Math.max(0, opts?.offset ?? 0);
+  if (opts?.limit === undefined) return rows.slice(offset);
+  return rows.slice(offset, offset + Math.max(0, opts.limit));
+}
 
 /**
  * Ephemeral {@link Store} backed by plain maps. The default when no database is
@@ -28,8 +41,11 @@ export class MemoryStore implements Store {
     return this.flows.get(id);
   }
 
-  listFlows(): StoredFlow[] {
-    return [...this.flows.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  listFlows(opts?: ListOptions): StoredFlow[] {
+    const rows = [...this.flows.values()].sort(
+      (a, b) => b.updatedAt - a.updatedAt,
+    );
+    return window(rows, opts);
   }
 
   deleteFlow(id: string): boolean {
@@ -44,9 +60,10 @@ export class MemoryStore implements Store {
     return this.runs.get(id);
   }
 
-  listRuns(flowId?: string): RunRecord[] {
-    return [...this.runs.values()]
+  listRuns(flowId?: string, opts?: ListOptions): RunRecord[] {
+    const rows = [...this.runs.values()]
       .filter((r) => (flowId ? r.flowId === flowId : true))
       .sort((a, b) => b.createdAt - a.createdAt);
+    return window(rows, opts);
   }
 }

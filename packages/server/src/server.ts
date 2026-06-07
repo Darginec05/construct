@@ -36,15 +36,29 @@ export function start(): void {
   const apiKey = process.env.CONSTRUCT_API_KEY;
   const port = Number(process.env.PORT ?? 8787);
 
-  const { app } = createServer({ db, apiKey });
+  const { app, store } = createServer({ db, apiKey });
 
-  serve({ fetch: app.fetch, port }, (info) => {
+  const server = serve({ fetch: app.fetch, port }, (info) => {
     console.log(`construct-server listening on http://localhost:${info.port}`);
     console.log(`  store: ${db ? `sqlite (${db})` : "memory — ephemeral, lost on restart"}`);
     console.log(
       `  auth:  ${apiKey ? "bearer token required" : "open — set CONSTRUCT_API_KEY to require a token"}`,
     );
   });
+
+  // Stop accepting connections, then release the store handle (flushes SQLite).
+  let closing = false;
+  const shutdown = (signal: string) => {
+    if (closing) return;
+    closing = true;
+    console.log(`\n${signal} received — shutting down`);
+    server.close(() => {
+      store.close?.();
+      process.exit(0);
+    });
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) start();

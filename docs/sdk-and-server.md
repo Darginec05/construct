@@ -1,24 +1,63 @@
 # SDK & Server
 
-## `@construct/server` 🚧 — self-hosted API
+## `@construct/server` ✅ — self-hosted API
 
-Hosts the engine behind an API. Today it exposes the core run handler that the
-eventual REST endpoint delegates to; the HTTP/WS framework and persistence layer
-are not wired yet.
+A single-workspace REST server over [Hono](https://hono.dev). It persists flows
+and runs, executes them through `@construct/engine` with the built-in nodes and
+model providers registered, and streams run events over Server-Sent Events.
 
-```ts
-import { handleRun } from "@construct/server";
+```bash
+# In-memory (ephemeral) — great for a quick try:
+npx construct-server
 
-const result = await handleRun({ flow, input });
-// internally: parseFlow(flow) → runFlow(flow, { initialState: input })
+# Durable — persist flows + runs to a SQLite file:
+CONSTRUCT_DB=./construct.db construct-server
+
+# Require a token on every /v1/* route:
+CONSTRUCT_API_KEY=secret CONSTRUCT_DB=./construct.db construct-server
 ```
 
-- ✅ `handleRun` — validates and runs a flow.
-- 📋 HTTP/WS framework (Hono or Fastify), `POST /v1/runs`, run streaming over WS.
-- 📋 Persistence: stored flows, run history, and **durable human pauses** (the
-  engine surfaces a pause; the server must persist and later resume it — see
-  [engine.md](./engine.md#human-pauses)). Ships as a reference adapter
-  (single-node SQLite/Postgres) so a self-hosted server is fully functional.
+Environment: `PORT` (default `8787`), `CONSTRUCT_DB` (SQLite file path; omit for
+in-memory), `CONSTRUCT_API_KEY` (when set, `/v1/*` needs `Authorization: Bearer`).
+
+### Routes
+
+| Method & path            | Purpose                                            |
+| ------------------------ | -------------------------------------------------- |
+| `GET /health`            | Liveness (unauthenticated).                        |
+| `GET /v1/flows`          | List stored flows.                                 |
+| `POST /v1/flows`         | Create/update a flow (validates the document).     |
+| `GET /v1/flows/:id`      | Fetch one flow.                                    |
+| `PUT /v1/flows/:id`      | Update one flow.                                   |
+| `DELETE /v1/flows/:id`   | Remove one flow.                                   |
+| `POST /v1/runs`          | Execute (`flowId` or inline `flow`). JSON, or SSE when `Accept: text/event-stream`. |
+| `GET /v1/runs[?flowId=]` | List run records.                                  |
+| `GET /v1/runs/:id`       | Fetch one run record.                              |
+
+```ts
+import { createServer, executeRun, MemoryStore } from "@construct/server";
+
+// Embed: build the app + store yourself.
+const { app, store } = createServer({ db: "./construct.db", apiKey: "secret" });
+
+// Or run a flow programmatically against any Store.
+const record = await executeRun(new MemoryStore(), { flow, input });
+```
+
+- ✅ Persistence via a `Store` interface with two reference adapters:
+  `MemoryStore` (default) and `SqliteStore` (Node's built-in `node:sqlite`, so
+  there are **no native build deps** — requires Node ≥ 22).
+- ✅ Providers registered lazily: `fake` always works offline; `anthropic` /
+  `openai` / `gemini` surface a missing-key error only when a flow targets them.
+- 📋 **Durable human pauses** — the engine surfaces a pause, but resuming
+  re-runs from the start (no state snapshot yet), so the server persists the
+  paused run but cannot yet resume it in place. See
+  [engine.md](./engine.md#human-pauses). True durable resume needs an engine
+  change and is deferred.
+
+> The OSS server is intentionally single-tenant and keyless-friendly. The cloud
+> control plane (multi-tenant, copilot, billing) is a separate private layer on
+> top of the same DSL contract — not in this repo.
 
 ## `@construct/sdk` ✅ (client) — programmatic access
 
@@ -33,5 +72,5 @@ const output = await client.run(flow, { topic: "…" });
 ```
 
 The client contract is stable; it depends on the server exposing `POST
-/v1/runs` (🚧 above). Until the server endpoint is live, drive the engine
-directly via `runFlow` or `handleRun`.
+/v1/runs` (✅ above). You can also drive the engine directly via `runFlow` or
+the server's `executeRun` / `handleRun` when embedding in-process.
