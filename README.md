@@ -13,7 +13,7 @@ the whole thing from one repo.
 
 [![CI](https://github.com/Darginec05/construct/actions/workflows/ci.yml/badge.svg)](https://github.com/Darginec05/construct/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-43853d.svg)](.nvmrc)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-43853d.svg)](.nvmrc)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-22e06b.svg)](CONTRIBUTING.md)
 
 [Documentation](docs/README.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md) · [Contributing](CONTRIBUTING.md)
@@ -63,8 +63,9 @@ referenced from it by name. No part of the stack is privileged.
               providers       tools            rag
               (LLMs)          (+ MCP)          (vector stores)
 
-   @construct/server — host the engine behind a REST/WS API + persistence
-   @construct/sdk    — programmatic client for that API
+   @construct/sdk    — fluent SDK to author flows in code (compiles to the contract)
+   @construct/server — host the engine behind a REST API + SSE + persistence
+   @construct/client — programmatic client for that API
 ```
 
 ## Quick start
@@ -77,7 +78,32 @@ yarn typecheck
 yarn test
 ```
 
-Requires **Node >= 20**.
+Requires **Node >= 22**.
+
+## Author a flow in code
+
+Flows are usually drawn on the canvas, but `@construct/sdk` lets you build the same
+contract fluently in TypeScript. Declare channels, chain nodes (edges auto-wire),
+then `toJSON()` to the document the editor stores — or `run()` it locally.
+
+```ts
+import { anthropic, defineFlow } from "@construct/sdk";
+
+export const echo = defineFlow("echo", "Echo agent", (f) => {
+  const message = f.text("message");
+  const reply = f.text("reply");
+
+  f.input({ channel: message })
+    .agent({ model: anthropic("claude-sonnet-4-6"), prompt: message, writeTo: reply })
+    .to(f.output(reply));
+});
+
+const doc = echo.toJSON();              // canonical Flow — round-trips to the canvas
+const result = await echo.run({ message: "hi" }); // execute locally
+```
+
+See [`packages/sdk/examples`](packages/sdk/examples) for production-shaped flows
+(CRM agent, code agent, website builder) authored this way.
 
 ## Monorepo layout
 
@@ -89,9 +115,10 @@ packages/
   providers/   @construct/providers   model-provider abstraction
   tools/       @construct/tools       tool contract + registry + built-ins
   rag/         @construct/rag         ingestion, chunking, vector adapters
-  mcp/         @construct/mcp         MCP client/server adapter (planned)
-  sdk/         @construct/sdk         programmatic client
-  server/      @construct/server      REST/WS API + persistence
+  mcp/         @construct/mcp         MCP client + tool adapter
+  sdk/         @construct/sdk         fluent SDK to author flows in code
+  client/      @construct/client      programmatic client for the server API
+  server/      @construct/server      REST API + SSE streaming + persistence
 apps/
   editor/      visual flow editor (React)
 ```
@@ -113,10 +140,11 @@ An honest snapshot — ✅ implemented · 🚧 partial · 📋 planned. See
 | `@construct/providers` | ✅ Anthropic, OpenAI, Gemini, Fake |
 | `@construct/tools` | ✅ Tool contract with tiers + approval, registry, built-ins |
 | `@construct/rag` | 🚧 Vector-store contract + in-memory store; no embeddings yet |
-| `@construct/sdk` | ✅ Thin client → `POST /v1/runs` |
-| `@construct/server` | 🚧 `handleRun` only; no HTTP framework or persistence yet |
+| `@construct/sdk` | ✅ Fluent authoring SDK: `defineFlow`/`defineTool`/`defineNode`, compiles to the contract, runs locally |
+| `@construct/client` | ✅ Thin client: `run`, `runStream` (SSE), `saveFlow` |
+| `@construct/server` | ✅ Hono REST API (flows CRUD, runs, SSE streaming), bearer auth, in-memory + SQLite stores |
+| `@construct/mcp` | ✅ MCP client + adapter mounting MCP server tools into the registry |
 | `apps/editor` | 🚧 Canvas, inspector, live validation, reader view |
-| `@construct/mcp` | 📋 Not started |
 
 ## Documentation
 
