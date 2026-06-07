@@ -19,6 +19,8 @@ export type FlowKind = "main" | "sub";
 export type RunStatus = "idle" | "running" | "completed" | "paused" | "failed";
 export type NodeRunState = "running" | "done" | "error";
 export type PublishStatus = "idle" | "publishing" | "done" | "error";
+/** Where a Run executes: the in-browser fake sandbox, or a real self-host server. */
+export type RunMode = "sandbox" | "server";
 
 export interface FlowDoc {
   id: string;
@@ -118,6 +120,8 @@ interface FlowStore {
   canRedo: boolean;
   // --- sandbox run state ---
   runStatus: RunStatus;
+  runMode: RunMode;
+  setRunMode: (mode: RunMode) => void;
   nodeRun: Record<string, NodeRunState>;
   trace: RunEvent[];
   runOutput: unknown;
@@ -145,6 +149,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
+  const [runMode, setRunMode] = useState<RunMode>("sandbox");
   const [nodeRun, setNodeRun] = useState<Record<string, NodeRunState>>({});
   const [trace, setTrace] = useState<RunEvent[]>([]);
   const [runOutput, setRunOutput] = useState<unknown>(undefined);
@@ -194,6 +199,9 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     },
     [snapshot],
   );
+
+  console.log("activeFlow", activeFlow);
+  console.log("runMode", runMode);
 
   const patchActive = useCallback(
     (fn: (f: FlowDoc) => FlowDoc) => {
@@ -308,8 +316,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
 
   // Keep a live snapshot so run callbacks always see the latest graph + inputs
   // without re-creating on every keystroke.
-  const snapRef = useRef({ activeFlow, flows, inputValues });
-  snapRef.current = { activeFlow, flows, inputValues };
+  const snapRef = useRef({ activeFlow, flows, inputValues, runMode });
+  snapRef.current = { activeFlow, flows, inputValues, runMode };
 
   const setInputValue = useCallback((key: string, value: string) => {
     setInputValues((v) => ({ ...v, [key]: value }));
@@ -324,7 +332,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const runActiveFlow = useCallback(async () => {
-    const { activeFlow, flows, inputValues } = snapRef.current;
+    const { activeFlow, flows, inputValues, runMode } = snapRef.current;
     setRunStatus("running");
     setNodeRun({});
     setTrace([]);
@@ -339,23 +347,29 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       input[key] = type.includes("number") ? Number(raw) : raw;
     }
 
+    const onEvent = (event: RunEvent) => {
+      setTrace((t) => [...t, event]);
+      if (event.nodeId == null) return;
+      const id = event.nodeId;
+      if (event.type === "node-start") setNodeRun((m) => ({ ...m, [id]: "running" }));
+      else if (event.type === "node-finish") setNodeRun((m) => ({ ...m, [id]: "done" }));
+      else if (event.type === "error") setNodeRun((m) => ({ ...m, [id]: "error" }));
+    };
+
     try {
-      const result = await executeFlow(activeFlow, flows, input, (event) => {
-        console.log("runActiveFlow event", event);
-
-        setTrace((t) => [...t, event]);
-        if (event.nodeId == null) return;
-        const id = event.nodeId;
-        if (event.type === "node-start") setNodeRun((m) => ({ ...m, [id]: "running" }));
-        else if (event.type === "node-finish") setNodeRun((m) => ({ ...m, [id]: "done" }));
-        else if (event.type === "error") setNodeRun((m) => ({ ...m, [id]: "error" }));
-      });
-
-      console.log("runActiveFlow result", result);
-
-      setRunStatus(result.status);
-      setRunOutput(result.output);
-      setRunError(result.error ?? null);
+      if (runMode === "server" && constructClient) {
+        // Real provider calls happen server-side; subflows resolve from the
+        // server's store, so a multi-flow workspace must be published first.
+        const record = await constructClient.runStream(toDslFlow(activeFlow), input, onEvent);
+        setRunStatus(record.status);
+        setRunOutput(record.output);
+        setRunError(record.error ?? null);
+      } else {
+        const result = await executeFlow(activeFlow, flows, input, onEvent);
+        setRunStatus(result.status);
+        setRunOutput(result.output);
+        setRunError(result.error ?? null);
+      }
     } catch (err) {
       setRunStatus("failed");
       setRunError(err instanceof Error ? err.message : String(err));
@@ -401,6 +415,8 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       canUndo: pastRef.current.length > 0,
       canRedo: futureRef.current.length > 0,
       runStatus,
+      runMode,
+      setRunMode,
       nodeRun,
       trace,
       runOutput,
@@ -409,7 +425,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       setInputValue,
       runActiveFlow,
       clearRun,
-      serverConfigured: constructClient != null,
+      serverConfigured: constructClient !== null,
       publishStatus,
       publishError,
       publishWorkspace,
@@ -431,6 +447,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       redo,
       histVer,
       runStatus,
+      runMode,
       nodeRun,
       trace,
       runOutput,

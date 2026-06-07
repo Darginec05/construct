@@ -128,7 +128,7 @@ export async function registerMcpTools(
 }
 
 function asArgs(input: unknown): Record<string, unknown> {
-  return input != null && typeof input === "object"
+  return input !==null && typeof input === "object"
     ? (input as Record<string, unknown>)
     : {};
 }

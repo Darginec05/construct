@@ -1,5 +1,5 @@
 {
-  "name": "construct",
+  "name": "construct-monorepo",
   "private": true,
   "version": "0.0.0",
   "packageManager": "yarn@1.22.22",

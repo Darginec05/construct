@@ -1,5 +1,5 @@
-import { CircleDot, FlaskConical, Loader2, Play, Plus } from "lucide-react";
-import { useFlow } from "../flow/flow-context.tsx";
+import { CircleDot, FlaskConical, Loader2, Play, Plus, Server } from "lucide-react";
+import { type RunMode, useFlow } from "../flow/flow-context.tsx";
 
 const inputCls =
   "w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring";
@@ -8,6 +8,9 @@ export function TestPanel() {
   const {
     nodes,
     runStatus,
+    runMode,
+    setRunMode,
+    serverConfigured,
     trace,
     runOutput,
     runError,
@@ -24,13 +27,29 @@ export function TestPanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-4 overflow-y-auto p-3">
-        <div className="flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/40 px-2.5 py-2 text-[11px] text-muted-foreground">
-          <FlaskConical size={14} className="mt-px shrink-0" />
-          <span>
-            <span className="font-medium text-foreground">Sandbox · simulated model.</span> Runs use
-            a fake echo provider — no API calls, no keys.
-          </span>
-        </div>
+        <RunModeToggle
+          mode={runMode}
+          serverConfigured={serverConfigured}
+          disabled={running}
+          onChange={setRunMode}
+        />
+        {runMode === "sandbox" ? (
+          <div className="flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/40 px-2.5 py-2 text-[11px] text-muted-foreground">
+            <FlaskConical size={14} className="mt-px shrink-0" />
+            <span>
+              <span className="font-medium text-foreground">Sandbox · simulated model.</span> Runs
+              use a fake echo provider — no API calls, no keys.
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-start gap-2 rounded-md border border-dashed border-[hsl(var(--cat-tool)/0.4)] bg-[hsl(var(--cat-tool)/0.08)] px-2.5 py-2 text-[11px] text-muted-foreground">
+            <Server size={14} className="mt-px shrink-0" />
+            <span>
+              <span className="font-medium text-foreground">Server · live models.</span> Runs hit
+              your self-host server with real providers. Publish first so sub-flows resolve.
+            </span>
+          </div>
+        )}
 
         <div>
           <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -100,6 +119,48 @@ export function TestPanel() {
   );
 }
 
+function RunModeToggle({
+  mode,
+  serverConfigured,
+  disabled,
+  onChange,
+}: {
+  mode: RunMode;
+  serverConfigured: boolean;
+  disabled: boolean;
+  onChange: (mode: RunMode) => void;
+}) {
+  const seg = (active: boolean) =>
+    `flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium transition ${
+      active ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+    } disabled:pointer-events-none disabled:opacity-40`;
+  return (
+    <div className="flex items-center gap-0.5 rounded-lg bg-secondary p-0.5">
+      <button
+        type="button"
+        className={seg(mode === "sandbox")}
+        disabled={disabled}
+        onClick={() => onChange("sandbox")}
+      >
+        <FlaskConical size={13} /> Sandbox
+      </button>
+      <button
+        type="button"
+        className={seg(mode === "server")}
+        disabled={disabled || !serverConfigured}
+        title={
+          serverConfigured
+            ? "Run on your self-host server with real providers"
+            : "Set VITE_CONSTRUCT_SERVER_URL (apps/editor/.env) to run on a server"
+        }
+        onClick={() => onChange("server")}
+      >
+        <Server size={13} /> Server
+      </button>
+    </div>
+  );
+}
+
 function Trace() {
   const { trace } = useFlow();
   const steps = trace.filter((e) => e.type === "node-start" || e.type === "node-finish" || e.type === "error");
@@ -131,20 +192,41 @@ function Trace() {
 }
 
 function Output({ value }: { value: unknown }) {
-  const text =
-    value == null
-      ? "(no output)"
-      : typeof value === "string"
-        ? value
-        : JSON.stringify(value, null, 2);
+  const bundle =
+    value !==null && typeof value === "object" && !Array.isArray(value)
+      ? Object.entries(value as Record<string, unknown>)
+      : null;
   return (
     <div>
       <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
         Output
       </div>
-      <pre className="whitespace-pre-wrap rounded-md border border-border bg-muted/40 px-2.5 py-2 text-[12px]">
-        {text}
-      </pre>
+      {bundle ? (
+        bundle.length === 0 ? (
+          <pre className="rounded-md border border-border bg-muted/40 px-2.5 py-2 text-[12px] text-muted-foreground">
+            (empty bundle)
+          </pre>
+        ) : (
+          <dl className="divide-y divide-border overflow-hidden rounded-md border border-border">
+            {bundle.map(([key, val]) => (
+              <div key={key} className="bg-muted/40 px-2.5 py-2">
+                <dt className="mb-0.5 font-mono text-[11px] text-muted-foreground">{key}</dt>
+                <dd className="whitespace-pre-wrap text-[12px]">{scalarText(val)}</dd>
+              </div>
+            ))}
+          </dl>
+        )
+      ) : (
+        <pre className="whitespace-pre-wrap rounded-md border border-border bg-muted/40 px-2.5 py-2 text-[12px]">
+          {scalarText(value)}
+        </pre>
+      )}
     </div>
   );
+}
+
+function scalarText(value: unknown): string {
+  if (value == null) return "(no output)";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
 }

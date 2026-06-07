@@ -30,8 +30,23 @@ export function createServer(options: ServerOptions = {}): ConstructServer {
   return { app, store };
 }
 
+/**
+ * Load a sibling `.env` (provider keys, CONSTRUCT_*) into `process.env` if one
+ * exists, so a self-hoster can drop a file next to the server instead of
+ * exporting vars. Absent file → fall back to the real environment (prod/CI).
+ */
+function loadDotenv(): boolean {
+  try {
+    process.loadEnvFile();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** CLI entry: read config from the environment and start listening. */
 export function start(): void {
+  const loadedEnvFile = loadDotenv();
   const db = process.env.CONSTRUCT_DB;
   const apiKey = process.env.CONSTRUCT_API_KEY;
   const port = Number(process.env.PORT ?? 8787);
@@ -40,6 +55,7 @@ export function start(): void {
 
   const server = serve({ fetch: app.fetch, port }, (info) => {
     console.log(`construct-server listening on http://localhost:${info.port}`);
+    console.log(`  env:   ${loadedEnvFile ? ".env loaded" : "no .env — using process env"}`);
     console.log(`  store: ${db ? `sqlite (${db})` : "memory — ephemeral, lost on restart"}`);
     console.log(
       `  auth:  ${apiKey ? "bearer token required" : "open — set CONSTRUCT_API_KEY to require a token"}`,

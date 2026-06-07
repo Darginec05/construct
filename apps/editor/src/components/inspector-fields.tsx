@@ -338,7 +338,7 @@ function FlowRefField({ value, onChange, flows }: ControlProps) {
 function UnionField(props: ControlProps) {
   const { spec, value, onChange } = props;
   if (spec.union === "text-or-structured") {
-    const structured = value != null && typeof value === "object";
+    const structured = value !==null && typeof value === "object";
     return (
       <div className="space-y-2">
         <PillSelect
@@ -351,7 +351,7 @@ function UnionField(props: ControlProps) {
     );
   }
   if (spec.union === "expr-or-record") {
-    const bundle = value != null && typeof value === "object";
+    const bundle = value !==null && typeof value === "object";
     return (
       <div className="space-y-2">
         <PillSelect

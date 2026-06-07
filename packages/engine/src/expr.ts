@@ -11,7 +11,7 @@ import type { RunState } from "./types.js";
 
 export function getByPath(obj: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
-    if (acc != null && typeof acc === "object") {
+    if (acc !==null && typeof acc === "object") {
       return (acc as Record<string, unknown>)[key];
     }
     return undefined;
