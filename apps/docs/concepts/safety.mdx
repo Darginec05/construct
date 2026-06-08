@@ -1,0 +1,53 @@
+---
+title: Safety and approval
+description: "Tiers, human approval gates, and fail-safe defaults make side effects first-class."
+---
+
+Safety is first-class in Construct. Every tool carries a **tier** that encodes
+the read-vs-write distinction, and write-class actions can be routed through a
+human approval node before they run.
+
+## Tiers
+
+| Tier | Meaning | Default handling |
+|------|---------|------------------|
+| `read` | fetch / inspect | auto-run |
+| `content` | produce content, no external mutation | auto-run |
+| `write` | mutate one thing | requires approval |
+| `bulk` | mutate many | requires approval |
+| `dangerous` | destructive / irreversible | requires approval |
+
+A tool can also force a gate with `requiresApproval: true` regardless of tier.
+
+## Fail-safe by default
+
+Gated tools **fail safe**: without an approver wired in, they are denied rather
+than silently run. Both the agent tool-loop and the standalone `tool` node route
+write/bulk/dangerous (and `requiresApproval`) calls through the engine's approval
+callback, denying when no approver is present.
+
+## The approval pattern
+
+A `tool` node with `requiresApproval: true` pauses the flow at a `human(approve)`
+gate; on `approved` the call proceeds, on `rejected` it routes elsewhere.
+
+```ts
+gate.on("true").human({ mode: "approve", exits: ["approved", "rejected"] });
+```
+
+## MCP tools default to dangerous
+
+MCP tools arrive with *no* tier. The adapter **must** default an unclassified
+MCP tool to a conservative tier (`dangerous` → `requiresApproval`) until it is
+explicitly mapped — otherwise an agent could auto-run an unknown third-party
+write tool. This is exactly what makes mounting arbitrary MCP servers safe.
+
+<Warning>
+  Read secrets from `process.env` — never hard-code them or put them in the Flow
+  document. Tools run server-side / locally, not in the editor, so real keys stay
+  out of the graph.
+</Warning>
+
+<Card title="Define a gated tool" icon="wrench" href="/sdk/define-tool">
+  `defineTool` with a tier and `requiresApproval`.
+</Card>

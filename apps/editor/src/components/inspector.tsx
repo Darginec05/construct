@@ -1,3 +1,5 @@
+import type { ValidationIssue } from "@construct/dsl";
+import { AlertTriangle, CircleAlert } from "lucide-react";
 import { CATEGORY_META, catalogEntry } from "../lib/catalog.ts";
 import { EXPR_PLACEHOLDER, GENERIC_HINTS, fieldLabel } from "../lib/labels.ts";
 import { describeSchema, type FieldSpec } from "../lib/zod-introspect.ts";
@@ -34,7 +36,7 @@ function isEmpty(value: unknown): boolean {
 }
 
 export function Inspector() {
-  const { selectedNode, updateNodeConfig, flows, activeFlowId } = useFlow();
+  const { selectedNode, updateNodeConfig, flows, activeFlowId, issuesByNode } = useFlow();
 
   if (!selectedNode) {
     return (
@@ -54,6 +56,7 @@ export function Inspector() {
 
   const Icon = entry?.icon;
   const cat = entry ? CATEGORY_META[entry.category] : undefined;
+  const nodeIssues = issuesByNode[selectedNode.id] ?? [];
 
   return (
     <div className="flex h-full flex-col">
@@ -81,6 +84,7 @@ export function Inspector() {
         <div className="mt-1.5 font-mono text-[10px] text-muted-foreground/70">{selectedNode.id}</div>
       </div>
       <div className="flex-1 space-y-3.5 overflow-y-auto p-4">
+        {nodeIssues.length > 0 ? <IssueList issues={nodeIssues} /> : null}
         {fields.length === 0 ? (
           <div className="text-[13px] text-muted-foreground">No configurable fields.</div>
         ) : (
@@ -97,6 +101,30 @@ export function Inspector() {
           ))
         )}
       </div>
+    </div>
+  );
+}
+
+function IssueList({ issues }: { issues: ValidationIssue[] }) {
+  return (
+    <div className="space-y-1.5">
+      {issues.map((issue, i) => {
+        const isError = issue.level === "error";
+        const Icon = isError ? CircleAlert : AlertTriangle;
+        return (
+          <div
+            key={i}
+            className={`flex items-start gap-2 rounded-md border px-2.5 py-2 text-[12px] leading-snug ${
+              isError
+                ? "border-destructive/30 bg-destructive/10 text-destructive"
+                : "border-[hsl(var(--cat-control)/0.3)] bg-[hsl(var(--cat-control)/0.1)] text-[hsl(var(--cat-control))]"
+            }`}
+          >
+            <Icon size={14} className="mt-0.5 shrink-0" />
+            <span className="min-w-0">{issue.message}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -1,0 +1,60 @@
+---
+title: Channels and state
+description: "Typed state slots that nodes read from and write into — with reducers that make concurrent writes deterministic."
+---
+
+Channels are a flow's typed state — its "variables" or "wires". A node reads from
+channels via expressions and writes its result into one via `writeTo`. That
+read-compute-write cycle is how data moves through the graph.
+
+## Typed slots
+
+Every channel declares a `DataType` (`text`, `json`, `image`, `file`, `audio`,
+`any`). In the SDK each type has a declarator that returns a `ChannelHandle`:
+
+```ts
+const message = f.text("message");
+const issues  = f.json("issues", z.object({ pass: z.boolean() }));
+```
+
+Passing a Zod schema to `f.json` makes `.path("field")` type-checked.
+
+## Reading a channel
+
+A `ChannelHandle` is used three ways:
+
+- as a value → serializes to `$.name` (read the whole channel);
+- inside `` f.tpl`...${handle}...` `` → interpolates `{{name}}` into text;
+- `handle.path("field")` → `$.name.field` (a typed sub-path).
+
+```ts
+const pass = issues.path("pass");   // "$.issues.pass"
+```
+
+## Reducers
+
+When several writes land on the same channel — most often from a `map` fan-out —
+the channel's **reducer** decides how they combine, so the result is
+deterministic regardless of completion order:
+
+| Reducer | Behaviour |
+|---------|-----------|
+| `lastValue` | overwrite with the newest value (default) |
+| `append` | push into an array — fan-out collects here |
+| `merge` | shallow-merge objects |
+
+<Note>
+  A `map` that fans work out to many branches should write into an `append` (or
+  `merge`) channel; otherwise concurrent writes race and only one survives.
+</Note>
+
+## writeTo
+
+`writeTo` names the channel a node writes its result into. Reads come from
+`$.channel` / `prompt` / `args` / `over` / `query`; the single write goes to
+`writeTo`. Keeping reads and the write explicit is what lets the engine thread
+shared state safely through a cyclic graph.
+
+<Card title="Author channels in code" icon="code" href="/sdk/overview">
+  The SDK's channel declarators return the handles used everywhere above.
+</Card>

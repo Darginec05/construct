@@ -1,7 +1,9 @@
-import { useMemo } from "react";
-import { validateFlow } from "@construct/dsl";
+import { useMemo, useState } from "react";
+import type { ValidationIssue } from "@construct/dsl";
 import {
+  AlertTriangle,
   Check,
+  CircleAlert,
   Layers,
   Loader2,
   Moon,
@@ -13,9 +15,11 @@ import {
   UploadCloud,
   Workflow,
 } from "lucide-react";
-import { toDslFlow } from "../flow/serialize.ts";
 import { type PublishStatus, useFlow } from "../flow/flow-context.tsx";
+import { EXAMPLES } from "../lib/examples.ts";
 import { useTheme } from "../lib/use-theme.ts";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select.tsx";
 import { ToggleGroup, ToggleItem } from "./ui/toggle-group.tsx";
 
 export type ViewMode = "canvas" | "reader";
@@ -41,10 +45,14 @@ export function TopBar({
   onToggleRight: () => void;
 }) {
   const { theme, toggle } = useTheme();
+  const [exampleSel, setExampleSel] = useState<string | null>(null);
   const {
     activeFlow,
     activeFlowId,
     renameFlow,
+    loadWorkspace,
+    issues,
+    focusNode,
     runStatus,
     runActiveFlow,
     undo,
@@ -57,15 +65,25 @@ export function TopBar({
     publishWorkspace,
   } = useFlow();
 
-  const { errors, warnings } = useMemo(() => {
-    const issues = validateFlow(toDslFlow(activeFlow));
-    return {
-      errors: issues.filter((i) => i.level === "error").length,
-      warnings: issues.filter((i) => i.level === "warning").length,
-    };
-  }, [activeFlow]);
+  const errors = useMemo(() => issues.filter((i) => i.level === "error").length, [issues]);
 
   const running = runStatus === "running";
+
+  const focusIssue = (issue: ValidationIssue) => {
+    onViewChange("canvas");
+    if (issue.nodeId) focusNode(issue.nodeId);
+  };
+
+  const onPickExample = (id: string | null) => {
+    if (!id) return;
+    const example = EXAMPLES.find((e) => e.id === id);
+    setExampleSel(null);
+    if (!example) return;
+    const ok = window.confirm(
+      `Загрузить пример «${example.name}»? Текущий workspace будет заменён.`,
+    );
+    if (ok) loadWorkspace(structuredClone(example.flows));
+  };
 
   return (
     <header className="flex items-center gap-2 border-b border-border px-3">
@@ -89,6 +107,19 @@ export function TopBar({
         </span>
       </div>
 
+      <Select value={exampleSel} onValueChange={(v: string | null) => onPickExample(v)}>
+        <SelectTrigger className="ml-2 h-8 w-[148px] text-[12px]" title="Load a ready-made example">
+          <SelectValue placeholder="Examples" />
+        </SelectTrigger>
+        <SelectContent>
+          {EXAMPLES.map((e) => (
+            <SelectItem key={e.id} value={e.id}>
+              {e.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
       <ToggleGroup
         value={[view]}
         onValueChange={(next: string[]) => {
@@ -106,7 +137,7 @@ export function TopBar({
       </ToggleGroup>
 
       <div className="ml-auto flex items-center gap-1.5">
-        <ValidationPill errors={errors} warnings={warnings} />
+        <ValidationPanel issues={issues} onFocus={focusIssue} />
 
         <button
           type="button"
@@ -217,27 +248,82 @@ function PublishButton({
   );
 }
 
-function ValidationPill({ errors, warnings }: { errors: number; warnings: number }) {
-  if (errors > 0) {
+function ValidationPanel({
+  issues,
+  onFocus,
+}: {
+  issues: ValidationIssue[];
+  onFocus: (issue: ValidationIssue) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const errors = issues.filter((i) => i.level === "error").length;
+  const warnings = issues.length - errors;
+
+  if (issues.length === 0) {
     return (
-      <span className="flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-[11px] font-medium text-destructive">
-        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
-        {errors} issue{errors === 1 ? "" : "s"}
+      <span className="flex items-center gap-1.5 rounded-full bg-[hsl(var(--cat-tool)/0.12)] px-2.5 py-1 text-[11px] font-medium text-[hsl(var(--cat-tool))]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--cat-tool))]" />
+        valid
       </span>
     );
   }
-  if (warnings > 0) {
-    return (
-      <span className="flex items-center gap-1.5 rounded-full bg-[hsl(var(--cat-control)/0.12)] px-2.5 py-1 text-[11px] font-medium text-[hsl(var(--cat-control))]">
-        <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--cat-control))]" />
-        {warnings} warning{warnings === 1 ? "" : "s"}
-      </span>
-    );
-  }
+
+  const pillClass =
+    errors > 0
+      ? "bg-destructive/10 text-destructive"
+      : "bg-[hsl(var(--cat-control)/0.12)] text-[hsl(var(--cat-control))]";
+  const dotClass = errors > 0 ? "bg-destructive" : "bg-[hsl(var(--cat-control))]";
+  const label =
+    errors > 0
+      ? `${errors} issue${errors === 1 ? "" : "s"}`
+      : `${warnings} warning${warnings === 1 ? "" : "s"}`;
+
   return (
-    <span className="flex items-center gap-1.5 rounded-full bg-[hsl(var(--cat-tool)/0.12)] px-2.5 py-1 text-[11px] font-medium text-[hsl(var(--cat-tool))]">
-      <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--cat-tool))]" />
-      valid
-    </span>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${pillClass}`}
+        title="Show validation issues"
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
+        {label}
+      </PopoverTrigger>
+      <PopoverContent className="max-h-[320px] w-[340px] overflow-y-auto p-1.5">
+        <div className="px-1.5 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {errors > 0 ? `${errors} error${errors === 1 ? "" : "s"}` : ""}
+          {errors > 0 && warnings > 0 ? " · " : ""}
+          {warnings > 0 ? `${warnings} warning${warnings === 1 ? "" : "s"}` : ""}
+        </div>
+        {issues.map((issue, i) => {
+          const isError = issue.level === "error";
+          const Icon = isError ? CircleAlert : AlertTriangle;
+          const where = issue.nodeId
+            ? `node: ${issue.nodeId}`
+            : issue.edgeId
+              ? `edge: ${issue.edgeId}`
+              : "flow";
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => {
+                onFocus(issue);
+                setOpen(false);
+              }}
+              disabled={!issue.nodeId}
+              className="flex w-full items-start gap-2 rounded-md px-1.5 py-1.5 text-left hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent"
+            >
+              <Icon
+                size={14}
+                className={`mt-0.5 shrink-0 ${isError ? "text-destructive" : "text-[hsl(var(--cat-control))]"}`}
+              />
+              <span className="min-w-0">
+                <span className="block text-[12px] leading-snug">{issue.message}</span>
+                <span className="block text-[11px] text-muted-foreground">{where}</span>
+              </span>
+            </button>
+          );
+        })}
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -1,0 +1,54 @@
+---
+title: Control flow
+description: "Branching, switches, loops, fan-out, and joins are part of the runtime — not plugins."
+---
+
+Control flow is intrinsic. The engine runs the graph as a **worklist over the
+edges**, not a topological sort, because the graph has cycles (loops, branch
+re-entry). This keeps orchestration deterministic and portable while the
+I/O-heavy leaves stay swappable.
+
+## OR-join vs. the `join` node
+
+The single most important rule:
+
+- A node with several incoming edges fires on **ANY** delivery (an implicit
+  OR-join). Loop bodies and branch re-entry depend on this.
+- A `join` node is the explicit **AND / quorum barrier**: it counts how many of
+  its incoming edges have delivered and fires per its `mode` — `all`, `any`, or
+  `quorum` with a `count`.
+
+So when you fan out and need *every* branch before continuing, route them into a
+`join`; if you route them into an ordinary node, it fires on the first arrival.
+
+## Branch and switch
+
+```ts
+const gate = node.branch({ condition: issues.path("pass") });
+gate.on("true").to(f.output(result));
+gate.on("false").to(node);            // back-edge — re-runs node
+```
+
+`switch` generalizes this to many cases plus a `default` handle.
+
+## Loop
+
+A `loop` runs its body until an `until` condition holds, bounded by
+`maxIterations` (default 5). It resolves its body flow by id at run time. A
+common multi-turn intake is a `human(collect)` wrapped in a `loop`.
+
+## Map (fan-out)
+
+A `map` runs a body `over` a collection with bounded `concurrency` (default 4)
+and an `aggregate` strategy (`merge` | `collect`). Fan-out results should land in
+an `append` or `merge` channel so concurrent writes combine deterministically —
+see [Channels](/concepts/channels).
+
+## Bounded by design
+
+Cycles are bounded by branch conditions *and* a global `maxSteps` guard (default
+1000), so a runaway flow always terminates.
+
+<Card title="The execution model" icon="gears" href="/reference/engine">
+  How the worklist runner threads state and fires nodes.
+</Card>

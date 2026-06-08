@@ -1,0 +1,10 @@
+{
+  "name": "@construct/docs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Construct documentation site (Mintlify).",
+  "scripts": {
+    "dev": "mintlify dev",
+    "check": "mintlify broken-links"
+  }
+}

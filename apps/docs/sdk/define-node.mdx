@@ -1,0 +1,51 @@
+---
+title: defineNode
+description: "Author a reusable, typed code node that runs a pure function over channel state."
+---
+
+`defineNode` authors a reusable unit of pure computation — the SDK equivalent of
+a `code` node. It runs a function over validated input and returns a value the
+flow writes into a channel.
+
+```ts
+import { z } from "zod";
+import { defineNode } from "@construct/sdk";
+
+const double = defineNode({
+  id: "double",
+  input: z.object({ x: z.number() }),
+  run: ({ x }) => x * 2,
+});
+```
+
+## The shape
+
+```ts
+defineNode({
+  id: string,            // stable identifier the flow references
+  input?: ZodSchema,     // validates args before run()
+  output?: ZodSchema,    // optional shape of the return value
+  run: (input, ctx) => result | Promise<result>,
+});
+```
+
+`run` receives the **parsed** input (when `input` is given) as its first
+argument, and an execution `ctx` as its second. Returning a value (or a promise)
+writes it into the node's `writeTo` channel.
+
+## When to use it
+
+Reach for `defineNode` for deterministic glue between model calls — routing
+math, shaping payloads, computing a key — anything that should not consume a
+model token. For side-effecting calls to your own API, prefer
+[`defineTool`](/sdk/define-tool) so the call carries a safety tier.
+
+<Note>
+  A `code` node's `inline` source is accepted by the DSL schema but is **not
+  executed in v1**. `defineNode` registers a real function, which is the
+  supported path.
+</Note>
+
+<Card title="Use it in a flow" icon="code" href="/sdk/define-flow">
+  Place the node with `.code(...)` and wire `writeTo`.
+</Card>

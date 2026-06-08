@@ -1,0 +1,88 @@
+---
+title: Defining tools
+description: "Give agents capabilities with defineTool — including calls to your own API."
+---
+
+A **tool** is a capability an agent can invoke. `defineTool` authors one from a Zod
+input schema: the schema both advertises JSON Schema parameters to the model and
+validates raw input before your `run` executes.
+
+```ts
+import { z } from "zod";
+import { defineTool } from "@construct/sdk";
+
+const crmSearch = defineTool({
+  name: "crm_search",                       // how the tool is exposed to the model
+  description: "Search CRM records (read-only).",
+  tier: "read",                             // safety class
+  input: z.object({ query: z.string() }),   // validated before run()
+  run: ({ query }) => searchRecords(query), // ← what actually happens
+});
+```
+
+## What `run` is
+
+`run` is the implementation — it executes when the model (or a `tool` node) calls
+the tool. The flow is: the model picks a tool and arguments → the SDK parses them
+through `input` → `run(parsedInput)` runs → its return value is fed back to the
+model as a tool result.
+
+## Calling your own API
+
+`run` is just an async function, so call your backend with `fetch`:
+
+```ts
+const deploySite = defineTool({
+  name: "deploy_site",
+  description: "Deploy the built site to our hosting.",
+  tier: "dangerous",
+  requiresApproval: true,
+  input: z.object({ files: z.array(z.string()), env: z.enum(["staging", "prod"]) }),
+  run: async ({ files, env }) => {
+    const res = await fetch("https://api.myserver.com/v1/deploy", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${process.env.DEPLOY_TOKEN}`,
+      },
+      body: JSON.stringify({ files, env }),
+    });
+    if (!res.ok) throw new Error(`deploy failed: ${res.status}`);
+    const { url } = await res.json();
+    return url;
+  },
+});
+```
+
+<Warning>
+  Read secrets from the environment (`process.env`) — never hard-code them or put
+  them in the Flow document. Tools run server-side / locally, not in the editor, so
+  real keys stay safe.
+</Warning>
+
+## Safety tiers and approval
+
+Every tool declares a `tier`. `read` and `content` auto-run; `write`, `bulk`, and
+`dangerous` are gated behind human approval. A tool can also force a gate with
+`requiresApproval: true` regardless of tier. Without an approver wired in, gated
+tools fail safe — they are denied, never silently run.
+
+| Tier | Behavior |
+|------|----------|
+| `read` | Auto-run |
+| `content` | Auto-run |
+| `write` | Requires approval |
+| `bulk` | Requires approval |
+| `dangerous` | Requires approval |
+
+## Using a tool in a flow
+
+Attach it to an agent, or drop it as a standalone `tool` node:
+
+```ts
+// available to the agent's tool-loop
+.agent({ model: anthropic("claude-sonnet-4-6"), tools: [crmSearch], writeTo: result })
+
+// or a deterministic single call
+.tool(deploySite, { args: { files, env: "prod" }, resource: hosting, writeTo: deployUrl })
+```

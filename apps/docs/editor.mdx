@@ -1,0 +1,69 @@
+---
+title: The visual editor
+description: "apps/editor — the canvas, inspector, reader view, and in-browser run trace."
+---
+
+The visual flow authoring surface: React 18 + Vite + React Flow + Tailwind +
+lucide icons. It wires to the **real** `@construct/dsl` package — node specs,
+validation, and output handles all come from the contract, not a mock catalog.
+
+## Layout
+
+```
+┌── TopBar ───────────────────────────────────────────────────────────┐
+│ brand · Workspace / flow-name · Canvas|Reader · validation · ⚙       │
+├─────────┬──────────────────────────────────────────┬────────────────┤
+│ LeftDock│            Canvas  /  Reader             │   RightDock     │
+│ rail +  │                                          │ Copilot|Test|   │
+│ panel   │                                          │ Inspector       │
+└─────────┴──────────────────────────────────────────┴────────────────┘
+```
+
+### Left dock
+A 52px icon rail switching a panel: **Node library** (searchable, grouped, drag
+onto canvas), **Outline** (flat node list), **Flows** (main + nested sub-flows),
+**Resources** (Models / Tools / Knowledge derived from the flow's node configs —
+there is no workspace registry in OSS).
+
+### Canvas
+React Flow graph with category-colored custom nodes. Output handles update
+**live** from `resolveNodeOutputs(type, config)`, so a `classifier`'s classes or
+a `switch`'s cases grow handles as you edit.
+
+### Reader view
+A linearized, plain-English read of the flow (topo-ordered, back-edges flagged)
+for review and explanation.
+
+### Right dock
+Tabbed **Copilot / Test / Inspector**, auto-switching to Inspector on selection.
+
+- **Inspector** — schema-driven. It introspects each node's Zod `configSchema`
+  and renders design-matched controls: pill selects for enums, toggles for
+  booleans, tag editors for string arrays, a structured `ModelRef` editor,
+  key→type rows for `input.schema`, key→expr rows for `args`/`inputs`, nested
+  `budget`, sub-flow pickers, and monospace expression fields.
+- **Test** — a real input form derived from the `input` node's `schema`. **Run**
+  executes the flow in an **in-browser sandbox** (`@construct/engine` with a fake
+  echo provider for every model id — no keys, no API calls), streams a
+  node-by-node trace, and shows the output.
+- **Copilot** — an honest disconnected shell. It does not fake AI edits; the
+  copilot is out of scope for the OSS editor.
+
+## Serialization & validation
+
+`toDslFlow(doc)` maps the editor's multi-flow store to a DSL `Flow` — reused for
+the live validation pill (`validateFlow`), the in-browser sandbox Run, and
+Publish.
+
+## Status
+
+- ✅ **Run + run-trace** — in-browser sandbox via `@construct/engine` + fake
+  provider; live node states and an event trace.
+- ✅ **Undo/Redo** — history stack over the flow doc (⌘Z / ⇧⌘Z), coalescing
+  rapid edits.
+- ✅ **Publish** — sends every workspace flow to a self-host `@construct/server`
+  via `@construct/client` (`POST /v1/flows`, upsert by id). The target is read
+  from build-time env (`VITE_CONSTRUCT_SERVER_URL`, optional
+  `VITE_CONSTRUCT_API_KEY`); when unset, the button is disabled and the editor
+  stays a pure sandbox.
+- 📋 **Copilot** — out of scope for this repo (cloud).

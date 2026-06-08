@@ -1,0 +1,52 @@
+---
+title: Flows are data
+description: "A flow is a versioned, validated document — the orchestration source of truth."
+---
+
+A **flow** is a JSON document, not code. It is the single source of truth that the
+editor draws, `validateFlow` checks, and the engine executes. Authoring tools (the
+canvas and `@construct/sdk`) are just different front-ends that emit the same shape.
+
+## Anatomy
+
+```ts
+interface Flow {
+  schemaVersion: number;     // contract version
+  id: string;
+  name: string;
+  channels: Channel[];       // typed state slots
+  resources: Resource[];     // external handles (db, sandbox, figma, …)
+  nodes: FlowNode[];         // units of work
+  edges: FlowEdge[];         // ordering between nodes
+  config: object;
+  metadata: object;
+}
+```
+
+## Channels
+
+Channels are the flow's typed state — its "variables" or "wires". A node reads from
+channels and writes its result into one via `writeTo`. Each channel has a `reducer`
+that decides how repeated writes combine:
+
+- `lastValue` (default) — overwrite with the newest value.
+- `append` — collect values into an array.
+- `merge` — shallow-merge objects.
+
+## Nodes and edges
+
+A **node** is a unit of work (an agent call, a tool, a branch, a sub-flow). An
+**edge** connects nodes and defines order. Some nodes expose named output handles
+— a `branch` has `true`/`false`, a `classifier` has one per class, a `human` has
+its exits — and edges leave through a specific handle.
+
+## Control flow is intrinsic
+
+Branching, switches, loops, `map` fan-out, `join` barriers, sub-flows, and human
+pauses are part of the runtime, not plugins. Models, tools, and retrieval are the
+pluggable leaves. This keeps orchestration deterministic and portable while leaving
+the I/O-heavy parts swappable.
+
+<Card title="Author flows in code" icon="code" href="/sdk/overview">
+  The SDK gives you a fluent, typed way to produce this document.
+</Card>

@@ -1,0 +1,40 @@
+---
+title: Examples
+description: "Production-shaped flows authored with the SDK, from a simple agent to a four-way fan-out."
+---
+
+The [`packages/sdk/examples`](https://github.com/Darginec05/construct/tree/main/packages/sdk/examples)
+folder has full, validating flows authored with the fluent builder. Each mirrors
+a reference topology and runs through `validateFlow` with zero errors.
+
+## airun — a CRM agent
+
+`prefilter → classify → tool-loop / gated write + approval`. A `defineNode`
+heuristic prefilter, a `classifier` with several classes forking read and write
+arms that rejoin a single output, and a `crm_update_unit` write tool gated behind
+a `human(approve)`.
+
+```ts
+.classifier({ model: anthropic("claude-haiku-4-5-20251001"), /* … */ })
+```
+
+## lovable — a code agent
+
+`plan → parallel workers → build → reflect loop`. An agent plans, a `map`
+(concurrency 4, `merge`) fans work to a worker sub-flow, a `code_exec` tool
+builds, and a `loop` re-runs until `build.ok`.
+
+## website-builder — fan-out to sub-agents
+
+The most complex example: `input → human(collect) → transform routing → agent →
+four-way fan-out via subflow → join(all) → build → review → deploy`. It shows the
+AND-barrier (`f.join([...], { mode: "all" })`), a back-edge from a review gate to
+the orchestrator, and a `dangerous` deploy tool behind approval.
+
+```ts
+const barrier = f.join([a, b, c, d], { mode: "all" });
+```
+
+<Card title="Run them" icon="play" href="/quickstart">
+  Each example exports a flow you can `toJSON()` or `run()` locally.
+</Card>

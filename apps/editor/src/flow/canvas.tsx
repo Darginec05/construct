@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import ReactFlow, {
   addEdge,
   Background,
@@ -19,8 +19,18 @@ const nodeTypes = { construct: ConstructNode };
 let nodeSeq = 0;
 
 function CanvasInner() {
-  const { nodes, edges, onNodesChange, onEdgesChange, setNodes, setEdges, setSelectedId } = useFlow();
-  const { screenToFlowPosition } = useReactFlow();
+  const { nodes, edges, onNodesChange, onEdgesChange, setNodes, setEdges, setSelectedId, focusTarget } = useFlow();
+  const { screenToFlowPosition, getNode, setCenter } = useReactFlow();
+
+  // Pan/zoom to a node when something (e.g. a validation issue) requests focus.
+  useEffect(() => {
+    if (!focusTarget) return;
+    const node = getNode(focusTarget.id);
+    if (!node) return;
+    const w = node.width ?? 248;
+    const h = node.height ?? 80;
+    setCenter(node.position.x + w / 2, node.position.y + h / 2, { zoom: 1.1, duration: 400 });
+  }, [focusTarget, getNode, setCenter]);
 
   const onConnect = useCallback(
     (c: Connection) => setEdges((eds) => addEdge(c, eds)),

@@ -1,0 +1,67 @@
+---
+title: defineFlow
+description: "The builder entry point — declare state, place nodes, and the edges auto-wire."
+---
+
+`defineFlow(id, name, callback)` is the entry point of the authoring SDK. It calls
+your callback with a `FlowBuilder` (conventionally `f`). You use `f` to declare
+state and place the entry/exit nodes; node-creation methods live on the returned
+handles and auto-wire their edges.
+
+```ts
+import { anthropic, defineFlow } from "@construct/sdk";
+
+export const echo = defineFlow("echo", "Echo agent", (f) => {
+  const message = f.text("message");
+  const reply = f.text("reply");
+
+  f.input({ channel: message })
+    .agent({ model: anthropic("claude-sonnet-4-6"), prompt: message, writeTo: reply })
+    .to(f.output(reply));
+});
+```
+
+## The builder (`f`)
+
+`FlowBuilder` carries:
+
+- **Channel declarators** — `f.text`, `f.json`, `f.image`, `f.file`, `f.audio`,
+  `f.any` — each returns a `ChannelHandle`.
+- **`f.resource(...)`** — declare an external handle (db, sandbox, figma, …).
+- **`f.input(...)`** / **`f.output(...)`** — the entry and terminal nodes.
+- **`f.join([...], { mode })`** — an AND/quorum barrier across branches.
+- **`` f.tpl`...` ``** — a tagged template that interpolates channel handles as
+  `{{name}}` into prompt text.
+
+## Nodes and wiring
+
+Every node-creation call (`.agent`, `.classifier`, `.tool`, `.branch`, `.switch`,
+`.loop`, `.map`, `.subflow`, `.human`, `.transform`, `.code`, `.retrieve`)
+creates a node and wires an edge from the current position. Named handles are
+followed with `.on("handle")`:
+
+```ts
+const gate = node.branch({ condition: issues.path("pass") });
+gate.on("true").human({ mode: "select" }).on("next").to(f.output(result));
+gate.on("false").to(node);   // back-edge
+```
+
+## Model helpers
+
+`anthropic`, `openai`, `gemini`, and the generic `provider` build a `ModelRef`.
+Each accepts `ModelOptions` (`temperature`, `maxTokens`, `cache`, `params`):
+
+```ts
+anthropic("claude-sonnet-4-6", { temperature: 0.2, maxTokens: 2048 })
+```
+
+## Run or export
+
+```ts
+flow.toJSON();                 // canonical Flow document (round-trips to the canvas)
+await flow.run({ message });   // execute locally (lazily wires the engine)
+```
+
+<Card title="Give an agent tools" icon="wrench" href="/sdk/define-tool">
+  Author capabilities with `defineTool`.
+</Card>

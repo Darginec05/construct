@@ -1,0 +1,102 @@
+---
+title: "@construct/engine"
+description: "The stateful-graph runtime that executes a Flow."
+---
+
+The engine executes a DSL `Flow`: typed channels with reducers, expression
+evaluation, branching, OR-join / `join` barriers, bounded loops, fan-out `map`,
+sub-flows, and durable human pauses.
+
+```ts
+import { runFlow } from "@construct/engine";
+
+const result = await runFlow(flow, {
+  input,            // seeds the input node / initial channels
+  initialState,     // pre-populated channel values
+  flows,            // Record<id, Flow> — REQUIRED for loop / map / subflow bodies
+  maxSteps: 1000,   // global cycle guard (default 1000)
+  validate: true,   // assertValidFlow before running (default true)
+  onEvent: (e) => {/* … */},     // stream RunEvents
+  onHuman: (node, ctx) => {/* … */}, // resolve a `human` node inline instead of pausing
+});
+```
+
+`loop`, `map`, and `subflow` resolve their body by id through `flows`; omit it
+and the run fails with `unresolved sub-flow "<id>"`. `onHuman` is optional — when
+absent a `human` node surfaces a durable pause; when present it returns a
+`{ patch?, handle? }` decision and the run continues without pausing.
+
+## Execution model
+
+`runFlow` runs the graph as a **worklist over the edges**, not a topo sort,
+because the graph has cycles (loops, branch re-entry).
+
+- A node with several incoming edges fires on **ANY** delivery (OR-join). Loop
+  bodies and branch re-entry rely on this.
+- A `join` node is the explicit **AND / quorum barrier** (`all` / `any` /
+  `quorum` with `count`).
+- Cycles are bounded by branch conditions *and* a global `maxSteps` guard, so a
+  runaway flow always terminates.
+
+Control-flow nodes (`input`, `output`, `branch`, `switch`, `loop`, `map`,
+`join`, `subflow`) are **intrinsic** to the runner. Leaf nodes resolve through
+the executor registry.
+
+## Channels & reducers
+
+State is a set of typed **channels**. Nodes read via expressions (`$.name`,
+`{{name}}`) and write via `writeTo`. When several writes land concurrently, the
+channel's reducer makes the result deterministic:
+
+| Reducer | Behaviour |
+|---------|-----------|
+| `lastValue` | overwrite (default) |
+| `append` | push into an array — fan-out collects here |
+| `merge` | shallow-merge objects |
+
+Helpers: `initState`, `applyPatch`, `channelMap`. Expression helpers: `evaluate`,
+`getByPath`, `truthy`.
+
+## Executors
+
+```ts
+registerExecutor(type, (ctx) => result | Promise<result>);
+registerFunction(name, fn);  // named handlers a `code` node's `ref` resolves to
+getExecutor(type); getFunction(name);
+```
+
+- **Shipped by the engine:** `transform` (pure expression) and `code` (runs a
+  function registered under `ref`). A `code` node's `inline` source is **not
+  executed in v1** — use `ref`.
+- **Shipped by `@construct/nodes`:** `agent`, `classifier`, `tool`, `retrieve` —
+  they need models / tools / vector stores. Call the package's register function
+  once at startup.
+
+If a node's `type` has no executor and isn't a control-flow node, the run fails
+fast.
+
+## Human pauses
+
+`human` nodes are **durable pauses**. When reached, the run surfaces a pause
+(`{ nodeId, exits }`) instead of blocking a thread. The host persists it and
+later resumes with the chosen exit handle (e.g. `approved`). This is how approval
+gates and multi-turn intake (a `human(collect)` in a `loop`) are expressed.
+
+## Events
+
+`onEvent` receives a `RunEvent` stream: `run-start` · `node-start` ·
+`node-finish` · `run-finish` · `paused` · `token` (streamed model deltas) ·
+`error`. Channel state is read off the `RunResult`, not a per-write event.
+
+## Result
+
+```ts
+interface RunResult {
+  flowId: string;
+  status: "completed" | "paused" | "failed";
+  state;                              // final channel state
+  output?;                            // terminal `output` node value
+  pause?: { nodeId: string; exits: string[] }; // set when status === "paused"
+  error?: string;                     // set when status === "failed"
+}
+```

@@ -1,0 +1,72 @@
+---
+title: Authoring SDK
+description: "@construct/sdk — build the Flow contract fluently in TypeScript."
+---
+
+`@construct/sdk` is a thin, typed layer over the `@construct/dsl` contract. You
+declare channels and resources, place nodes by chaining, and `toJSON()` to the
+exact `Flow` the visual editor stores — so code and canvas round-trip. It adds
+authoring ergonomics only; the graph stays the orchestration source of truth.
+
+## The builder
+
+`defineFlow(id, name, callback)` calls your callback with a `FlowBuilder` (`f`).
+You use it to declare state and place the entry/exit nodes; node-creation methods
+live on the returned handles and auto-wire their edges.
+
+```ts
+import { anthropic, defineFlow } from "@construct/sdk";
+
+export const echo = defineFlow("echo", "Echo agent", (f) => {
+  const message = f.text("message");   // declare a channel
+  const reply = f.text("reply");
+
+  f.input({ channel: message })        // entry node
+    .agent({ model: anthropic("claude-sonnet-4-6"), prompt: message, writeTo: reply })
+    .to(f.output(reply));              // terminal node
+});
+```
+
+## Channels
+
+`f.text`, `f.json`, `f.image`, `f.file`, `f.audio`, and `f.any` declare typed
+channels and return a `ChannelHandle`. A handle is used three ways:
+
+- as a value → serializes to `$.name` (read it);
+- inside `` f.tpl`...${handle}...` `` → interpolates `{{name}}` into text;
+- `handle.path("field")` → `$.name.field` (typed when you pass a Zod schema).
+
+```ts
+const issues = f.json("issues", z.object({ pass: z.boolean() }));
+issues.path("pass");   // "$.issues.pass"
+```
+
+## Nodes and wiring
+
+Every node-creation call (`.agent`, `.classifier`, `.tool`, `.branch`, `.map`,
+`.loop`, `.subflow`, `.human`, …) creates a node and wires an edge from the current
+position. Named handles are followed with `.on("handle")`, and `f.join([...])` is
+an AND/quorum barrier:
+
+```ts
+const gate = node.branch({ condition: issues.path("pass") });
+gate.on("true").human({ mode: "select" }).on("next").to(f.output(result));
+gate.on("false").to(node);   // back-edge
+```
+
+## writeTo
+
+`writeTo` names the channel a node writes its result into. Reads come from
+`$.channel` / `prompt` / `args` / `over` / `query`; the write goes to `writeTo`.
+That read-compute-write pattern is how data flows through the graph.
+
+## Run or export
+
+```ts
+flow.toJSON();                 // canonical Flow document (round-trips to the canvas)
+await flow.run({ message });   // execute locally (lazily wires the engine)
+```
+
+<Card title="Tools" icon="wrench" href="/sdk/define-tool">
+  Give an agent capabilities with `defineTool`.
+</Card>

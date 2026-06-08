@@ -1,0 +1,48 @@
+---
+title: How the pieces fit
+description: "The Construct packages and how data flows between them."
+---
+
+Construct is a monorepo of small packages that all point **inward** toward the DSL
+contract. The editor and SDK author it; the engine runs it; everything else is a
+leaf resolved through a registry.
+
+```
+   Editor (apps/editor) ── visual authoring
+   @construct/sdk       ── code-first authoring
+              │ both serialize to
+              ▼
+     @construct/dsl  ── the versioned Flow contract
+              │
+   ┌──────────┼───────────────┐
+   ▼          ▼               ▼
+ validate   engine          nodes
+            (runtime)       (agent / classifier / tool / retrieve)
+                                │ uses
+                  ┌─────────────┼──────────────┐
+                  ▼             ▼               ▼
+              providers       tools            rag
+              (LLMs)          (+ MCP)          (vector stores)
+
+   @construct/server — host the engine behind a REST API + SSE + persistence
+   @construct/client — programmatic client for that API
+```
+
+## Packages
+
+| Package | Role |
+|---------|------|
+| `@construct/dsl` | Flow schema, types, validation — the contract every other package targets. |
+| `@construct/engine` | Stateful-graph runtime: channels, branch/switch, joins, loops, fan-out, sub-flows, human pauses. |
+| `@construct/nodes` | Built-in executors: `agent`, `classifier`, `tool`, `retrieve`. |
+| `@construct/providers` | Model-provider abstraction (Anthropic, OpenAI, Gemini, Fake). |
+| `@construct/tools` | Tool contract with tiers + approval, registry, built-ins. |
+| `@construct/rag` | Vector-store contract, chunking, in-memory store. |
+| `@construct/mcp` | MCP client + adapter to mount MCP server tools into the registry. |
+| `@construct/sdk` | Fluent SDK to author flows in code. |
+| `@construct/client` | Thin client for the server API. |
+| `@construct/server` | REST API + SSE streaming + persistence. |
+| `apps/editor` | The visual flow editor (React). |
+
+Dependencies point inward: `engine` depends only on `dsl`; `nodes` depends on
+`dsl` + `engine` + `providers` + `tools` + `rag`. Nothing depends on the editor.

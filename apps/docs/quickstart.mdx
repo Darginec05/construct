@@ -1,0 +1,66 @@
+---
+title: Quickstart
+description: "Install the monorepo, run it, and author your first flow in code."
+---
+
+## Prerequisites
+
+Construct requires **Node >= 22** and uses Yarn workspaces + Turbo.
+
+## Install and build
+
+```bash
+yarn install
+yarn build       # turbo run build
+yarn dev         # editor + watch builds
+yarn typecheck
+yarn test
+```
+
+## Author a flow in code
+
+Flows are usually drawn on the canvas, but `@construct/sdk` lets you build the same
+contract fluently in TypeScript. Declare channels, chain nodes (edges auto-wire),
+then `toJSON()` to the document the editor stores — or `run()` it locally.
+
+```ts
+import { anthropic, defineFlow } from "@construct/sdk";
+
+export const echo = defineFlow("echo", "Echo agent", (f) => {
+  const message = f.text("message");
+  const reply = f.text("reply");
+
+  f.input({ channel: message })
+    .agent({ model: anthropic("claude-sonnet-4-6"), prompt: message, writeTo: reply })
+    .to(f.output(reply));
+});
+
+const doc = echo.toJSON();                          // canonical Flow document
+const result = await echo.run({ message: "hi" });   // execute locally
+```
+
+<Note>
+  Running a flow against a real provider needs the matching API key in your
+  environment (e.g. `ANTHROPIC_API_KEY`). Use the fake provider from
+  `@construct/providers` for tests.
+</Note>
+
+## Explore the examples
+
+The [`packages/sdk/examples`](https://github.com/Darginec05/construct/tree/main/packages/sdk/examples)
+folder has production-shaped flows authored with the SDK:
+
+- **airun** — a CRM agent: prefilter → classify → tool-loop / gated write + approval.
+- **lovable** — a code agent: plan → parallel workers → build → reflect loop.
+- **website-builder** — fan-out to four sub-agents → AND-join → build → review → deploy.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Concepts" icon="puzzle-piece" href="/concepts/overview">
+    Flows, channels, nodes, and how they connect.
+  </Card>
+  <Card title="Authoring SDK" icon="code" href="/sdk/overview">
+    Build flows fluently in TypeScript.
+  </Card>
+</CardGroup>

@@ -1,0 +1,37 @@
+---
+title: "@construct/client"
+description: "A thin programmatic client for a Construct server."
+---
+
+`@construct/client` is the thin HTTP client for a self-hosted
+[`@construct/server`](/deploy/server). It targets the server's REST routes and
+adds Bearer auth when an API key is set.
+
+```ts
+import { ConstructClient } from "@construct/client";
+
+const client = new ConstructClient({ baseUrl: "https://…", apiKey: "…" });
+
+const output = await client.run(flow, { topic: "…" });
+// POST {baseUrl}/v1/runs  with Bearer auth when apiKey is set
+```
+
+## What it does
+
+- **`run(flow, input)`** → `POST /v1/runs`, resolves to the run output.
+- **`runStream(...)`** → the SSE variant, yielding `RunEvent`s as they arrive.
+- **`saveFlow(flow)`** → `POST /v1/flows` (upsert by id).
+
+The client contract is stable; it depends on the server exposing `POST /v1/runs`.
+
+<Note>
+  Don't confuse the two SDKs. `@construct/sdk` is the **authoring** layer (build
+  a Flow document in code); `@construct/client` is the **transport** layer (send
+  a Flow to a running server). You can also drive the engine directly via
+  `runFlow`, or the server's `executeRun` / `handleRun` when embedding
+  in-process.
+</Note>
+
+<Card title="Author the flow first" icon="code" href="/sdk/overview">
+  Build the Flow document with `@construct/sdk`, then send it with the client.
+</Card>

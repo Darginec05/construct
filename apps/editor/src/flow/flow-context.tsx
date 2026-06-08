@@ -7,6 +7,7 @@ import {
   type OnEdgesChange,
   type OnNodesChange,
 } from "reactflow";
+import { validateFlow, type Resource, type ValidationIssue } from "@construct/dsl";
 import type { RunEvent } from "@construct/engine";
 import { executeFlow } from "../lib/runtime.ts";
 import { constructClient } from "../lib/server.ts";
@@ -29,6 +30,9 @@ export interface FlowDoc {
   parent?: string;
   nodes: FlowNode[];
   edges: Edge[];
+  /** Declared external resources (sandbox, db, …). The editor has no authoring
+   *  surface yet, but imported flows carry them so resource refs validate. */
+  resources?: Resource[];
 }
 
 const INITIAL_FLOWS: FlowDoc[] = [
@@ -103,6 +107,8 @@ interface FlowStore {
   activeFlowId: string;
   setActiveFlowId: (id: string) => void;
   renameFlow: (id: string, name: string) => void;
+  /** Replace the entire workspace (used to load a ready-made example). */
+  loadWorkspace: (docs: FlowDoc[]) => void;
   nodes: FlowNode[];
   edges: Edge[];
   onNodesChange: OnNodesChange;
@@ -113,6 +119,12 @@ interface FlowStore {
   setSelectedId: (id: string | null) => void;
   selectedNode: FlowNode | null;
   updateNodeConfig: (id: string, patch: Record<string, unknown>) => void;
+  // --- validation ---
+  issues: ValidationIssue[];
+  issuesByNode: Record<string, ValidationIssue[]>;
+  /** Select a node and pan the canvas to it (used to locate a validation issue). */
+  focusNode: (id: string) => void;
+  focusTarget: { id: string; seq: number } | null;
   // --- undo / redo ---
   undo: () => void;
   redo: () => void;
@@ -143,7 +155,7 @@ const keyBy = (docs: FlowDoc[]): Record<string, FlowDoc> =>
   Object.fromEntries(docs.map((f) => [f.id, f]));
 
 export function FlowProvider({ children }: { children: React.ReactNode }) {
-  const [order] = useState<string[]>(() => INITIAL_FLOWS.map((f) => f.id));
+  const [order, setOrder] = useState<string[]>(() => INITIAL_FLOWS.map((f) => f.id));
   const [byId, setById] = useState<Record<string, FlowDoc>>(() => keyBy(INITIAL_FLOWS));
   const [activeFlowId, setActiveId] = useState<string>(() => INITIAL_FLOWS[0]!.id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -315,6 +327,22 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     [activeFlow, selectedId],
   );
 
+  const issues = useMemo(() => validateFlow(toDslFlow(activeFlow)), [activeFlow]);
+  const issuesByNode = useMemo(() => {
+    const map: Record<string, ValidationIssue[]> = {};
+    for (const i of issues) {
+      if (i.nodeId) (map[i.nodeId] ??= []).push(i);
+    }
+    return map;
+  }, [issues]);
+
+  const [focusTarget, setFocusTarget] = useState<{ id: string; seq: number } | null>(null);
+  const focusSeq = useRef(0);
+  const focusNode = useCallback((id: string) => {
+    setSelectedId(id);
+    setFocusTarget({ id, seq: ++focusSeq.current });
+  }, []);
+
   // Keep a live snapshot so run callbacks always see the latest graph + inputs
   // without re-creating on every keystroke.
   const snapRef = useRef({ activeFlow, flows, inputValues, runMode });
@@ -331,6 +359,23 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     setRunOutput(undefined);
     setRunError(null);
   }, []);
+
+  const loadWorkspace = useCallback(
+    (docs: FlowDoc[]) => {
+      if (docs.length === 0) return;
+      setOrder(docs.map((d) => d.id));
+      setById(keyBy(docs));
+      setActiveId(docs[0]!.id);
+      setSelectedId(null);
+      pastRef.current = [];
+      futureRef.current = [];
+      lastCommitRef.current = null;
+      bumpHistory((n) => n + 1);
+      clearRun();
+      setInputValues({});
+    },
+    [clearRun],
+  );
 
   const runActiveFlow = useCallback(async () => {
     const { activeFlow, flows, inputValues, runMode } = snapRef.current;
@@ -401,6 +446,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       activeFlowId,
       setActiveFlowId,
       renameFlow,
+      loadWorkspace,
       nodes: activeFlow.nodes,
       edges: activeFlow.edges,
       onNodesChange,
@@ -411,6 +457,10 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       setSelectedId,
       selectedNode,
       updateNodeConfig,
+      issues,
+      issuesByNode,
+      focusNode,
+      focusTarget,
       undo,
       redo,
       canUndo: pastRef.current.length > 0,
@@ -437,6 +487,7 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       activeFlowId,
       setActiveFlowId,
       renameFlow,
+      loadWorkspace,
       onNodesChange,
       onEdgesChange,
       setNodes,
@@ -444,6 +495,10 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       selectedId,
       selectedNode,
       updateNodeConfig,
+      issues,
+      issuesByNode,
+      focusNode,
+      focusTarget,
       undo,
       redo,
       histVer,

@@ -1,0 +1,80 @@
+---
+title: "@construct/tools & MCP"
+description: "The tool contract, the tier safety model, and the MCP bridge."
+---
+
+This is how a flow reaches the outside world. Three concentric rings, all feeding
+the **same registry**, so a `tool` node (or an agent's `tools[]`) references a
+capability by name without caring whether it's a built-in, a native integration,
+or proxied over MCP.
+
+```
+@construct/tools        the Tool contract + registry  (thin core)
+@construct/integrations connectors w/ creds + Resource lifecycle  (planned)
+@construct/mcp          mount any MCP server's tools/resources
+```
+
+## `@construct/tools` — the contract
+
+```ts
+interface Tool<Input = unknown, Output = unknown> {
+  name: string;
+  description: string;
+  parameters?: Record<string, unknown>; // JSON Schema advertised to the model
+  tier?: Tier;                           // intrinsic safety class
+  requiresApproval?: boolean;
+  run(input: Input): Promise<Output>;
+}
+registerTool(t); getTool(name); listTools();
+```
+
+`defineTool({ input: zodSchema, run })` derives `parameters` from a Zod schema.
+`runTool` adds graceful error + timeout handling. A small opt-in built-in set
+ships (`time_now`, `http_fetch`); credentialed connectors do **not** belong in
+this package.
+
+## The tier safety model
+
+`tier` + `requiresApproval` encode the read-vs-write distinction:
+
+| Tier | Meaning | Default handling |
+|------|---------|------------------|
+| `read` / `content` | fetch / inspect | auto-run |
+| `write` / `bulk` / `dangerous` | mutate / destroy | route through a `human` approval node first |
+
+A common pattern: a `tool` node with `requiresApproval: true` pauses the flow at
+a `human(approve)` gate; on `approved` the call proceeds, on `rejected` it routes
+elsewhere. See [Safety and approval](/concepts/safety).
+
+## `@construct/integrations` (planned) — native connectors
+
+Per-connector packages (e.g. `@construct/integration-github`) that depend on
+`tools` + `dsl`. Each exports one or more **`Tool`s** (with proper tiers) and a
+**Resource provider** bound to a `Resource.kind`, implementing the acquire → use
+→ release lifecycle that `Resource.scope` governs. They give **depth** — accurate
+tiers, real session lifecycles — for the handful of services that matter most.
+
+## `@construct/mcp` — the Model Context Protocol bridge
+
+### MCP client
+
+Connect to MCP servers (stdio / SSE / HTTP), list their tools and resources, and
+**adapt** each into Construct's abstractions:
+
+- each MCP tool → a `Tool` (its input schema → `parameters`) registered via
+  `registerTool`;
+- each MCP resource → a `Resource` provider.
+
+One adapter buys **breadth**: any MCP server becomes available to a flow.
+
+<Warning>
+  MCP tools arrive with *no* tier. The adapter **must** default an unmapped MCP
+  tool to a conservative tier (`dangerous` → `requiresApproval`) until it is
+  explicitly classified — otherwise an agent could auto-run an unknown
+  third-party write tool.
+</Warning>
+
+### MCP server (planned)
+
+The symmetric capability: expose a Construct flow *as* an MCP tool, so other
+agents and MCP-aware clients can call your flow.

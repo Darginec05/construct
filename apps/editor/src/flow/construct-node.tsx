@@ -1,5 +1,6 @@
 import { resolveNodeOutputs } from "@construct/dsl";
 import { memo } from "react";
+import { AlertTriangle } from "lucide-react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import { catalogEntry, CATEGORY_META } from "../lib/catalog.ts";
 import { useFlow, type NodeRunState } from "./flow-context.tsx";
@@ -21,8 +22,20 @@ function ConstructNodeImpl({ id, data, selected }: NodeProps<ConstructNodeData>)
   const hueVar = entry ? CATEGORY_META[entry.category].hueVar : "--cat-io";
   const Icon = entry?.icon;
   const outputs = resolveNodeOutputs(data.type, data.config);
-  const { nodeRun } = useFlow();
+  const { nodeRun, issuesByNode } = useFlow();
   const status = nodeRun[id];
+  const nodeIssues = issuesByNode[id] ?? [];
+  const hasError = nodeIssues.some((i) => i.level === "error");
+  const hasWarning = !hasError && nodeIssues.length > 0;
+  const issueColor = hasError ? "hsl(var(--destructive))" : "hsl(var(--cat-control))";
+
+  const borderColor = status
+    ? RUN_RING[status]
+    : selected
+      ? "hsl(var(--cat))"
+      : hasError || hasWarning
+        ? issueColor
+        : "hsl(var(--border))";
 
   return (
     <div
@@ -30,12 +43,12 @@ function ConstructNodeImpl({ id, data, selected }: NodeProps<ConstructNodeData>)
       style={{
         // @ts-expect-error custom property
         "--cat": `var(${hueVar})`,
-        borderColor: status
-          ? RUN_RING[status]
-          : selected
-            ? "hsl(var(--cat))"
-            : "hsl(var(--border))",
-        boxShadow: status ? `0 0 0 2px ${RUN_RING[status]}` : undefined,
+        borderColor,
+        boxShadow: status
+          ? `0 0 0 2px ${RUN_RING[status]}`
+          : !selected && (hasError || hasWarning)
+            ? `0 0 0 1px ${issueColor}`
+            : undefined,
       }}
     >
       <Handle
@@ -57,6 +70,14 @@ function ConstructNodeImpl({ id, data, selected }: NodeProps<ConstructNodeData>)
             style={{ background: RUN_RING[status] }}
             title={status}
           />
+        ) : nodeIssues.length > 0 ? (
+          <span
+            className="ml-auto flex shrink-0 items-center"
+            style={{ color: issueColor }}
+            title={nodeIssues.map((i) => `${i.level}: ${i.message}`).join("\n")}
+          >
+            <AlertTriangle size={13} />
+          </span>
         ) : null}
       </div>
 

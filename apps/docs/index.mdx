@@ -1,0 +1,48 @@
+---
+title: Introduction
+description: "Construct — an open-source platform for building complex AI agents."
+---
+
+Construct is an open-source platform for building complex AI agents. You chain LLM
+nodes — orchestrators, routers, tools, retrievers, and sub-agents — into runnable
+flows on a visual canvas or in code, then run them locally or self-host the engine
+behind an API.
+
+## The DSL is the spine
+
+A flow is **data**: a versioned, validated document (`@construct/dsl`). The editor
+authors it, `validateFlow` checks it, the engine executes it, and every extension
+point (providers, tools, vector stores) is referenced from it by name. No part of
+the stack is privileged — the same contract powers the canvas, the SDK, and the
+runtime.
+
+## Design principles
+
+<CardGroup cols={2}>
+  <Card title="One stable contract" icon="file-lines">
+    Editor, engine, and tooling all target the same schema.
+  </Card>
+  <Card title="Open graph, typed built-ins" icon="diagram-project">
+    Any node `type` is allowed for plugins; the built-in catalog ships typed
+    config schemas and declared output handles.
+  </Card>
+  <Card title="Control flow is intrinsic" icon="code-branch">
+    Branching, loops, fan-out, joins, sub-flows, and human pauses live in the
+    runtime. Models, tools, and retrieval are pluggable leaves.
+  </Card>
+  <Card title="Safety is first-class" icon="shield-check">
+    Tools carry a tier (read → dangerous); write-class actions can be routed
+    through a human-approval node before they run.
+  </Card>
+</CardGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install, run, and author your first flow.
+  </Card>
+  <Card title="How the pieces fit" icon="puzzle-piece" href="/concepts/overview">
+    The packages and how data flows between them.
+  </Card>
+</CardGroup>

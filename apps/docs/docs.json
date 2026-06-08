@@ -1,0 +1,95 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Construct",
+  "colors": {
+    "primary": "#22e06b",
+    "light": "#22e06b",
+    "dark": "#0d1117"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["index", "quickstart", "architecture", "roadmap"]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/overview",
+              "concepts/flows",
+              "concepts/channels",
+              "concepts/nodes",
+              "concepts/control-flow",
+              "concepts/safety"
+            ]
+          },
+          {
+            "group": "Editor",
+            "pages": ["editor"]
+          }
+        ]
+      },
+      {
+        "tab": "SDK",
+        "groups": [
+          {
+            "group": "Authoring SDK",
+            "pages": [
+              "sdk/overview",
+              "sdk/define-flow",
+              "sdk/define-tool",
+              "sdk/define-node",
+              "sdk/examples"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Packages",
+            "pages": [
+              "reference/dsl",
+              "reference/engine",
+              "reference/nodes-providers",
+              "reference/tools-mcp",
+              "reference/rag"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Self-host",
+        "groups": [
+          {
+            "group": "Deploy",
+            "pages": ["deploy/server", "deploy/client"]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/Darginec05/construct"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Darginec05/construct"
+    }
+  }
+}

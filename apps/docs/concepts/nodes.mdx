@@ -1,0 +1,50 @@
+---
+title: Nodes
+description: "The units of work in a flow — control-flow nodes are intrinsic, leaf nodes are pluggable."
+---
+
+A **node** is a unit of work. The graph is structurally open — a node `type` is
+any string and its `config` is an opaque record, so plugins can register their
+own — but the built-in catalog ships typed config schemas and declared output
+handles that `validateFlow` and the editor rely on.
+
+## Two kinds of node
+
+- **Control-flow nodes** are *intrinsic* to the runtime: `input`, `output`,
+  `branch`, `switch`, `loop`, `map`, `join`, `subflow`. The engine executes them
+  directly.
+- **Leaf nodes** reach the outside world and resolve through a registry:
+  `agent`, `classifier`, `tool`, `retrieve` (from `@construct/nodes`), plus the
+  engine's own `transform` and `code`.
+
+## The built-in catalog
+
+| Node | Role |
+|------|------|
+| `input` | Entry node; seeds channels from the run input. |
+| `output` | Terminal node; exposes a channel (or a bundle) as the result. |
+| `agent` | Model call running a bounded tool-use loop. |
+| `classifier` | Cheap forced-choice decision; each class is an output handle. |
+| `branch` | Boolean split with `true` / `false` handles. |
+| `switch` | Multi-way split — one handle per case, plus `default`. |
+| `loop` | Runs a body until a condition holds (bounded by `maxIterations`). |
+| `map` | Fan-out over a collection (bounded `concurrency`, aggregated result). |
+| `join` | AND / quorum barrier across multiple incoming edges. |
+| `code` | Runs a function registered under `ref`. |
+| `retrieve` | RAG lookup against a named vector store. |
+| `transform` | Pure expression over channel state. |
+| `tool` | Deterministic single tool call with a safety tier. |
+| `human` | Durable pause for approval / selection / annotation / collection. |
+| `subflow` | Invokes another flow as a node. |
+
+## Output handles
+
+Some nodes expose **named output handles** and edges leave through a specific
+one. A `branch` has `true`/`false`; a `switch` has one per case plus `default`;
+a `classifier` grows one per class; a `human` exposes its exits
+(`approved`/`rejected`, `next`, or custom). The editor recomputes these live from
+`resolveNodeOutputs(type, config)` as you edit config.
+
+<Card title="Control flow in depth" icon="shuffle" href="/concepts/control-flow">
+  How branch, switch, loop, map, and join compose.
+</Card>
