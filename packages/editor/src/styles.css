@@ -1,0 +1,76 @@
+:root {
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+  --primary: 240 5.9% 10%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 240 5.9% 10%;
+  --radius: 0.6rem;
+
+  --cat-io: 215 16% 47%;
+  --cat-model: 262 83% 58%;
+  --cat-control: 25 95% 53%;
+  --cat-data: 217 91% 60%;
+  --cat-tool: 160 84% 39%;
+  --cat-human: 330 81% 50%;
+  --cat-composite: 192 91% 36%;
+
+  --canvas-bg: 240 5% 96%;
+  --canvas-dot: 240 6% 84%;
+  --rf-edge: 240 5% 64%;
+
+  --shadow-sm: 0 1px 2px 0 hsl(240 6% 10% / 0.05);
+  --shadow-md: 0 2px 4px -1px hsl(240 6% 10% / 0.06), 0 4px 12px -2px hsl(240 6% 10% / 0.08);
+  --shadow-lg: 0 8px 30px -6px hsl(240 6% 10% / 0.16);
+}
+
+html[data-theme="dark"] {
+  --background: 240 10% 5%;
+  --foreground: 0 0% 96%;
+  --card: 240 8% 8.5%;
+  --card-foreground: 0 0% 96%;
+  --popover: 240 8% 8.5%;
+  --popover-foreground: 0 0% 96%;
+  --primary: 0 0% 96%;
+  --primary-foreground: 240 6% 10%;
+  --secondary: 240 5% 15%;
+  --secondary-foreground: 0 0% 96%;
+  --muted: 240 5% 15%;
+  --muted-foreground: 240 5% 60%;
+  --accent: 240 5% 17%;
+  --accent-foreground: 0 0% 96%;
+  --destructive: 0 72% 58%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 5% 17%;
+  --input: 240 5% 19%;
+  --ring: 240 5% 70%;
+
+  --cat-io: 215 18% 62%;
+  --cat-model: 262 86% 70%;
+  --cat-control: 25 92% 60%;
+  --cat-data: 217 91% 66%;
+  --cat-tool: 160 70% 50%;
+  --cat-human: 330 82% 64%;
+  --cat-composite: 192 78% 52%;
+
+  --canvas-bg: 240 9% 7%;
+  --canvas-dot: 240 5% 20%;
+  --rf-edge: 240 5% 38%;
+
+  --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.4);
+  --shadow-md: 0 2px 6px -1px hsl(0 0% 0% / 0.45), 0 4px 14px -2px hsl(0 0% 0% / 0.5);
+  --shadow-lg: 0 10px 34px -6px hsl(0 0% 0% / 0.6);
+}

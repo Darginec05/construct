@@ -6,63 +6,14 @@ import {
   type OnEdgesChange,
   type OnNodesChange,
 } from "reactflow";
+import type { Resource } from "@construct/dsl";
+import { toDslFlow } from "./serialize.ts";
 import type { FlowDoc, FlowNode } from "./types.ts";
 
-const INITIAL_FLOWS: FlowDoc[] = [
-  {
-    id: "main",
-    name: "Assistant",
-    kind: "main",
-    nodes: [
-      { id: "in", type: "construct", position: { x: 0, y: 120 }, data: { type: "input", config: { schema: { message: "text" } } } },
-      {
-        id: "ag",
-        type: "construct",
-        position: { x: 320, y: 120 },
-        data: {
-          type: "agent",
-          config: {
-            model: { provider: "anthropic", model: "claude-sonnet-4-6" },
-            prompt: "{{ $.message }}",
-            writeTo: "reply",
-          },
-        },
-      },
-      { id: "out", type: "construct", position: { x: 640, y: 120 }, data: { type: "output", config: { from: "$.reply" } } },
-    ],
-    edges: [
-      { id: "e1", source: "in", target: "ag" },
-      { id: "e2", source: "ag", target: "out" },
-    ],
-  },
-  {
-    id: "reviewer",
-    name: "Reviewer",
-    kind: "sub",
-    parent: "main",
-    nodes: [
-      { id: "r-in", type: "construct", position: { x: 0, y: 120 }, data: { type: "input", config: { schema: { draft: "text" } } } },
-      {
-        id: "r-ag",
-        type: "construct",
-        position: { x: 320, y: 120 },
-        data: {
-          type: "agent",
-          config: {
-            model: { provider: "anthropic", model: "claude-sonnet-4-6" },
-            prompt: "{{ $.draft }}",
-            writeTo: "review",
-          },
-        },
-      },
-      { id: "r-out", type: "construct", position: { x: 640, y: 120 }, data: { type: "output", config: { from: "$.review" } } },
-    ],
-    edges: [
-      { id: "re1", source: "r-in", target: "r-ag" },
-      { id: "re2", source: "r-ag", target: "r-out" },
-    ],
-  },
-];
+/** Stable content key for a doc: the canonical DSL projection, which drops
+ *  reactflow-only UI noise (selection, measured width/height) so that clicks
+ *  and post-mount measurement don't look like graph edits to the autosave. */
+const dslKey = (doc: FlowDoc): string => JSON.stringify(toDslFlow(doc));
 
 type NodesSetter = (update: FlowNode[] | ((prev: FlowNode[]) => FlowNode[])) => void;
 type EdgesSetter = (update: Edge[] | ((prev: Edge[]) => Edge[])) => void;
@@ -72,7 +23,16 @@ interface HistEntry {
   activeFlowId: string;
 }
 
+/** Graph payload for {@link WorkspaceStore.applyActiveFlow}. */
+export interface ApplyActiveFlowInput {
+  name?: string;
+  nodes: FlowNode[];
+  edges: Edge[];
+  resources?: Resource[];
+}
+
 const HISTORY_LIMIT = 100;
+const FLOW_CHANGE_DEBOUNCE_MS = 800;
 
 interface WorkspaceStore {
   flows: FlowDoc[];
@@ -82,6 +42,9 @@ interface WorkspaceStore {
   renameFlow: (id: string, name: string) => void;
   /** Replace the entire workspace (used to load a ready-made example). */
   loadWorkspace: (docs: FlowDoc[]) => void;
+  /** Replace the active flow's graph (name/nodes/edges/resources) as ONE undo
+   *  commit — used by the copilot facade to ingest a patched DSL Flow. */
+  applyActiveFlow: (next: ApplyActiveFlowInput) => void;
   /** Bumped whenever the workspace is replaced, so dependent contexts (run,
    *  inputs) can reset without the outer provider reaching into them. */
   epoch: number;
@@ -109,10 +72,26 @@ const WorkspaceCtx = createContext<WorkspaceStore | null>(null);
 const keyBy = (docs: FlowDoc[]): Record<string, FlowDoc> =>
   Object.fromEntries(docs.map((f) => [f.id, f]));
 
-export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
-  const [order, setOrder] = useState<string[]>(() => INITIAL_FLOWS.map((f) => f.id));
-  const [byId, setById] = useState<Record<string, FlowDoc>>(() => keyBy(INITIAL_FLOWS));
-  const [activeFlowId, setActiveId] = useState<string>(() => INITIAL_FLOWS[0]!.id);
+// Crash-safe fallback when the host supplies no `initialFlows`: a single blank
+// main flow so the editor always has an active doc. Real seed data (demos,
+// tenant flows) lives in the host and arrives through `initialFlows`.
+const EMPTY_WORKSPACE: FlowDoc[] = [{ id: "main", name: "Untitled", kind: "main", nodes: [], edges: [] }];
+
+type WorkspaceProviderProps = {
+  initialFlows?: FlowDoc[];
+  onFlowChange?: (doc: FlowDoc) => void;
+  children: React.ReactNode;
+}
+
+export function WorkspaceProvider({
+  initialFlows,
+  onFlowChange,
+  children,
+}: WorkspaceProviderProps) {
+  const seed = initialFlows && initialFlows.length > 0 ? initialFlows : EMPTY_WORKSPACE;
+  const [order, setOrder] = useState<string[]>(() => seed.map((f) => f.id));
+  const [byId, setById] = useState<Record<string, FlowDoc>>(() => keyBy(seed));
+  const [activeFlowId, setActiveId] = useState<string>(() => seed[0]!.id);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [epoch, setEpoch] = useState(0);
 
@@ -262,6 +241,52 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo]);
 
+  // Notify the host (debounced, per flow) when a flow's graph changes, so the
+  // cloud can autosave. The ref-diff is a cheap pre-filter; the actual decision
+  // to emit compares the canonical DSL projection (`dslKey`) against the last
+  // value sent, so reactflow UI noise (selection, post-mount measurement) and
+  // undo-to-identical never trigger a redundant save. Seeded from the initial
+  // docs, so the first measurement pass after mount stays silent. Deletions
+  // aren't reported — a removed id simply stops emitting.
+  const onFlowChangeRef = useRef(onFlowChange);
+  onFlowChangeRef.current = onFlowChange;
+  const emitTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const lastSentRef = useRef<Map<string, string> | null>(null);
+  if (lastSentRef.current === null) {
+    lastSentRef.current = new Map(seed.map((d) => [d.id, dslKey(d)]));
+  }
+  const prevByIdRef = useRef(byId);
+  useEffect(() => {
+    const prev = prevByIdRef.current;
+    prevByIdRef.current = byId;
+    if (!onFlowChangeRef.current) return;
+    const timers = emitTimersRef.current;
+    for (const id of Object.keys(byId)) {
+      if (byId[id] === prev[id]) continue;
+      const pending = timers.get(id);
+      if (pending) clearTimeout(pending);
+      timers.set(
+        id,
+        setTimeout(() => {
+          timers.delete(id);
+          const doc = byIdRef.current[id];
+          if (!doc) return;
+          const key = dslKey(doc);
+          if (lastSentRef.current!.get(id) === key) return;
+          lastSentRef.current!.set(id, key);
+          onFlowChangeRef.current?.(doc);
+        }, FLOW_CHANGE_DEBOUNCE_MS),
+      );
+    }
+  }, [byId]);
+  useEffect(() => {
+    const timers = emitTimersRef.current;
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+    };
+  }, []);
+
   const flows = useMemo(() => order.map((id) => byId[id]!), [order, byId]);
   const selectedNode = useMemo(
     () => activeFlow.nodes.find((n) => n.id === selectedId) ?? null,
@@ -274,6 +299,20 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     setSelectedId(id);
     setFocusTarget({ id, seq: ++focusSeq.current });
   }, []);
+
+  const applyActiveFlow = useCallback(
+    (next: ApplyActiveFlowInput) => {
+      commit("apply-flow");
+      patchActive((f) => ({
+        ...f,
+        ...(next.name !== undefined ? { name: next.name } : {}),
+        nodes: next.nodes,
+        edges: next.edges,
+        ...(next.resources !== undefined ? { resources: next.resources } : {}),
+      }));
+    },
+    [patchActive, commit],
+  );
 
   const loadWorkspace = useCallback((docs: FlowDoc[]) => {
     if (docs.length === 0) return;
@@ -296,6 +335,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       setActiveFlowId,
       renameFlow,
       loadWorkspace,
+      applyActiveFlow,
       epoch,
       nodes: activeFlow.nodes,
       edges: activeFlow.edges,
@@ -321,6 +361,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       setActiveFlowId,
       renameFlow,
       loadWorkspace,
+      applyActiveFlow,
       epoch,
       onNodesChange,
       onEdgesChange,

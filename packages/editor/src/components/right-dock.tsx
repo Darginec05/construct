@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Box, Play, Sparkles, type LucideIcon } from "lucide-react";
-import { Copilot } from "./copilot.tsx";
 import { Inspector } from "./inspector.tsx";
 import { TestPanel } from "./test-panel.tsx";
 import { Tabs, TabsIndicator, TabsList, TabsPanel, TabsTab } from "./ui/tabs.tsx";
@@ -9,18 +8,19 @@ import { useWorkspace } from "../flow/workspace-context.tsx";
 type TabId = "copilot" | "test" | "inspector";
 
 const TABS: { id: TabId; icon: LucideIcon; label: string }[] = [
-  { id: "copilot", icon: Sparkles, label: "Copilot" },
   { id: "test", icon: Play, label: "Test" },
   { id: "inspector", icon: Box, label: "Inspector" },
 ];
 
-export function RightDock() {
+export function RightDock({ copilot }: { copilot?: React.ReactNode }) {
   const { selectedId } = useWorkspace();
-  const [tab, setTab] = useState<TabId>("inspector");
+  const [tab, setTab] = useState<TabId>(!!copilot ? "copilot" : "inspector");
 
   useEffect(() => {
     if (selectedId) setTab("inspector");
   }, [selectedId]);
+
+  const tabs = !!copilot ? [{ id: "copilot", icon: Sparkles, label: "Copilot" }, ...TABS] : TABS;
 
   return (
     <Tabs
@@ -29,7 +29,7 @@ export function RightDock() {
       className="flex h-full flex-col"
     >
       <TabsList className="border-b border-border">
-        {TABS.map((t) => {
+        {tabs.map((t) => {
           const Icon = t.icon;
           return (
             <TabsTab key={t.id} value={t.id}>
@@ -40,9 +40,13 @@ export function RightDock() {
         <TabsIndicator />
       </TabsList>
       <div className="min-h-0 flex-1">
-        <TabsPanel value="copilot">
-          <Copilot />
-        </TabsPanel>
+        {/* keepMounted: an injected copilot holds chat state locally; without it
+            a tab switch would unmount and wipe the conversation. */}
+        {copilot && (
+          <TabsPanel value="copilot" keepMounted>
+            {copilot}
+          </TabsPanel>
+        )}
         <TabsPanel value="test">
           <TestPanel />
         </TabsPanel>

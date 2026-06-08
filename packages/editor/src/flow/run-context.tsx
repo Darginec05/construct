@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRe
 import { resolveNodeOutputs } from "@construct/dsl";
 import type { HumanDecision, RunEvent } from "@construct/engine";
 import { executeFlow } from "../lib/runtime.ts";
-import { constructClient } from "../lib/server.ts";
+import { useConstructClient } from "./client-context.tsx";
 import { toDslFlow } from "./serialize.ts";
 import type { NodeRunState, PendingHuman, RunMode, RunStatus } from "./types.ts";
 import { useWorkspace } from "./workspace-context.tsx";
@@ -32,11 +32,12 @@ const RunCtx = createContext<RunStore | null>(null);
 
 export function RunProvider({ children }: { children: React.ReactNode }) {
   const { activeFlow, flows, epoch } = useWorkspace();
+  const client = useConstructClient();
 
   const [runStatus, setRunStatus] = useState<RunStatus>("idle");
   // Default to Server when one is configured, so a real run is the obvious path;
   // Sandbox (fake echo, no keys) stays available as a deliberate choice.
-  const [runMode, setRunMode] = useState<RunMode>(constructClient !== null ? "server" : "sandbox");
+  const [runMode, setRunMode] = useState<RunMode>(client !== null ? "server" : "sandbox");
   const [nodeRun, setNodeRun] = useState<Record<string, NodeRunState>>({});
   const [trace, setTrace] = useState<RunEvent[]>([]);
   const [streamByNode, setStreamByNode] = useState<Record<string, string>>({});
@@ -52,8 +53,8 @@ export function RunProvider({ children }: { children: React.ReactNode }) {
 
   // Keep a live snapshot so run callbacks always see the latest graph + inputs
   // without re-creating on every keystroke.
-  const snapRef = useRef({ activeFlow, flows, inputValues, runMode });
-  snapRef.current = { activeFlow, flows, inputValues, runMode };
+  const snapRef = useRef({ activeFlow, flows, inputValues, runMode, client });
+  snapRef.current = { activeFlow, flows, inputValues, runMode, client };
 
   const setInputValue = useCallback((key: string, value: string) => {
     setInputValues((v) => ({ ...v, [key]: value }));
@@ -99,7 +100,7 @@ export function RunProvider({ children }: { children: React.ReactNode }) {
   }, [epoch, clearRun]);
 
   const runActiveFlow = useCallback(async () => {
-    const { activeFlow, flows, inputValues, runMode } = snapRef.current;
+    const { activeFlow, flows, inputValues, runMode, client } = snapRef.current;
     abortRun();
     const token = { aborted: false };
     runTokenRef.current = token;
@@ -141,10 +142,10 @@ export function RunProvider({ children }: { children: React.ReactNode }) {
       });
 
     try {
-      if (runMode === "server" && constructClient) {
+      if (runMode === "server" && client) {
         // Real provider calls happen server-side; subflows resolve from the
         // server's store, so a multi-flow workspace must be published first.
-        const record = await constructClient.runStream(toDslFlow(activeFlow), input, onEvent);
+        const record = await client.runStream(toDslFlow(activeFlow), input, onEvent);
         if (token.aborted) return;
         setRunStatus(record.status);
         setRunOutput(record.output);
@@ -179,9 +180,10 @@ export function RunProvider({ children }: { children: React.ReactNode }) {
       setInputValue,
       runActiveFlow,
       clearRun,
-      serverConfigured: constructClient !== null,
+      serverConfigured: client !== null,
     }),
     [
+      client,
       runStatus,
       runMode,
       nodeRun,
