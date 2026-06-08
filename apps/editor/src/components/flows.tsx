@@ -1,8 +1,9 @@
 import { Box, Workflow } from "lucide-react";
-import { useFlow, type FlowDoc } from "../flow/flow-context.tsx";
+import type { FlowDoc } from "../flow/types.ts";
+import { useWorkspace } from "../flow/workspace-context.tsx";
 
 export function Flows() {
-  const { flows, activeFlowId, setActiveFlowId } = useFlow();
+  const { flows, activeFlowId, setActiveFlowId } = useWorkspace();
   const mains = flows.filter((f) => f.kind === "main");
 
   return (

@@ -3,7 +3,9 @@ import { memo } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import { catalogEntry, CATEGORY_META } from "../lib/catalog.ts";
-import { useFlow, type NodeRunState } from "./flow-context.tsx";
+import { useRun } from "./run-context.tsx";
+import type { NodeRunState } from "./types.ts";
+import { useValidation } from "./validation-context.tsx";
 
 export interface ConstructNodeData {
   type: string;
@@ -22,7 +24,8 @@ function ConstructNodeImpl({ id, data, selected }: NodeProps<ConstructNodeData>)
   const hueVar = entry ? CATEGORY_META[entry.category].hueVar : "--cat-io";
   const Icon = entry?.icon;
   const outputs = resolveNodeOutputs(data.type, data.config);
-  const { nodeRun, issuesByNode } = useFlow();
+  const { nodeRun } = useRun();
+  const { issuesByNode } = useValidation();
   const status = nodeRun[id];
   const nodeIssues = issuesByNode[id] ?? [];
   const hasError = nodeIssues.some((i) => i.level === "error");

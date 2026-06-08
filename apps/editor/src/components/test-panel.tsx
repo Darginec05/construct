@@ -1,5 +1,7 @@
 import { CircleDot, FlaskConical, Loader2, Play, Plus, Server, UserCheck } from "lucide-react";
-import { type PendingHuman, type RunMode, useFlow } from "../flow/flow-context.tsx";
+import { useRun } from "../flow/run-context.tsx";
+import type { PendingHuman, RunMode } from "../flow/types.ts";
+import { useWorkspace } from "../flow/workspace-context.tsx";
 import { catalogEntry } from "../lib/catalog.ts";
 import { fieldLabel } from "../lib/labels.ts";
 import { Markdown } from "./markdown.tsx";
@@ -9,8 +11,8 @@ const inputCls =
   "w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-[13px] outline-none focus:ring-2 focus:ring-ring";
 
 export function TestPanel() {
+  const { nodes } = useWorkspace();
   const {
-    nodes,
     runStatus,
     runMode,
     setRunMode,
@@ -24,7 +26,7 @@ export function TestPanel() {
     inputValues,
     setInputValue,
     runActiveFlow,
-  } = useFlow();
+  } = useRun();
 
   const inputNode = nodes.find((n) => n.data.type === "input");
   const schema = (inputNode?.data.config.schema as Record<string, string> | undefined) ?? {};
@@ -175,7 +177,7 @@ function RunModeToggle({
 }
 
 function Trace() {
-  const { trace } = useFlow();
+  const { trace } = useRun();
   const steps = trace.filter((e) => e.type === "node-start" || e.type === "node-finish" || e.type === "error");
   return (
     <div>

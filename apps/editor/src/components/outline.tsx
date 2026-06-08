@@ -1,8 +1,8 @@
 import { catalogEntry, CATEGORY_META } from "../lib/catalog.ts";
-import { useFlow } from "../flow/flow-context.tsx";
+import { useWorkspace } from "../flow/workspace-context.tsx";
 
 export function Outline() {
-  const { nodes, activeFlow, selectedId, setSelectedId } = useFlow();
+  const { nodes, activeFlow, selectedId, setSelectedId } = useWorkspace();
 
   return (
     <div className="flex h-full flex-col">

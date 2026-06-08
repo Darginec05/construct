@@ -15,7 +15,11 @@ import {
   UploadCloud,
   Workflow,
 } from "lucide-react";
-import { type PublishStatus, useFlow } from "../flow/flow-context.tsx";
+import { usePublish } from "../flow/publish-context.tsx";
+import { useRun } from "../flow/run-context.tsx";
+import type { PublishStatus } from "../flow/types.ts";
+import { useValidation } from "../flow/validation-context.tsx";
+import { useWorkspace } from "../flow/workspace-context.tsx";
 import { EXAMPLES } from "../lib/examples.ts";
 import { useTheme } from "../lib/use-theme.ts";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
@@ -51,19 +55,15 @@ export function TopBar({
     activeFlowId,
     renameFlow,
     loadWorkspace,
-    issues,
     focusNode,
-    runStatus,
-    runActiveFlow,
     undo,
     redo,
     canUndo,
     canRedo,
-    serverConfigured,
-    publishStatus,
-    publishError,
-    publishWorkspace,
-  } = useFlow();
+  } = useWorkspace();
+  const { issues } = useValidation();
+  const { runStatus, runActiveFlow } = useRun();
+  const { serverConfigured, publishStatus, publishError, publishWorkspace } = usePublish();
 
   const errors = useMemo(() => issues.filter((i) => i.level === "error").length, [issues]);
 

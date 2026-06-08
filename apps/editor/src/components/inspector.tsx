@@ -3,7 +3,8 @@ import { AlertTriangle, CircleAlert } from "lucide-react";
 import { CATEGORY_META, catalogEntry } from "../lib/catalog.ts";
 import { EXPR_PLACEHOLDER, GENERIC_HINTS, fieldLabel } from "../lib/labels.ts";
 import { describeSchema, type FieldSpec } from "../lib/zod-introspect.ts";
-import { useFlow } from "../flow/flow-context.tsx";
+import { useValidation } from "../flow/validation-context.tsx";
+import { useWorkspace } from "../flow/workspace-context.tsx";
 import { FieldControl, type FlowRef } from "./inspector-fields.tsx";
 
 /** Node-specific help, keyed by `${nodeType}.${fieldKey}`. Generic per-key help lives in labels.ts. */
@@ -36,7 +37,8 @@ function isEmpty(value: unknown): boolean {
 }
 
 export function Inspector() {
-  const { selectedNode, updateNodeConfig, flows, activeFlowId, issuesByNode } = useFlow();
+  const { selectedNode, updateNodeConfig, flows, activeFlowId } = useWorkspace();
+  const { issuesByNode } = useValidation();
 
   if (!selectedNode) {
     return (

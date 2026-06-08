@@ -12,14 +12,14 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import { DND_TYPE } from "../components/node-library.tsx";
 import { ConstructNode, type ConstructNodeData } from "./construct-node.tsx";
-import { useFlow } from "./flow-context.tsx";
+import { useWorkspace } from "./workspace-context.tsx";
 
 const nodeTypes = { construct: ConstructNode };
 
 let nodeSeq = 0;
 
 function CanvasInner() {
-  const { nodes, edges, onNodesChange, onEdgesChange, setNodes, setEdges, setSelectedId, focusTarget } = useFlow();
+  const { nodes, edges, onNodesChange, onEdgesChange, setNodes, setEdges, setSelectedId, focusTarget } = useWorkspace();
   const { screenToFlowPosition, getNode, setCenter } = useReactFlow();
 
   // Pan/zoom to a node when something (e.g. a validation issue) requests focus.
@@ -85,7 +85,7 @@ function CanvasInner() {
 }
 
 export function Canvas() {
-  const { activeFlowId } = useFlow();
+  const { activeFlowId } = useWorkspace();
   return (
     <ReactFlowProvider key={activeFlowId}>
       <CanvasInner />

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Cpu, Database, KeyRound, Wrench, type LucideIcon } from "lucide-react";
-import { useFlow, type FlowNode } from "../flow/flow-context.tsx";
+import type { FlowNode } from "../flow/types.ts";
+import { useWorkspace } from "../flow/workspace-context.tsx";
 
 interface ResItem {
   key: string;
@@ -42,7 +43,7 @@ function derive(nodes: FlowNode[]) {
 }
 
 export function Resources() {
-  const { nodes, activeFlow } = useFlow();
+  const { nodes, activeFlow } = useWorkspace();
   const { models, tools, stores } = useMemo(() => derive(nodes), [nodes]);
 
   return (

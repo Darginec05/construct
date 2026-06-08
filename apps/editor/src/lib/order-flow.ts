@@ -1,5 +1,5 @@
 import type { Edge } from "reactflow";
-import type { FlowNode } from "../flow/flow-context.tsx";
+import type { FlowNode } from "../flow/types.ts";
 
 function fmt(v: unknown): string {
   if (v == null) return "—";

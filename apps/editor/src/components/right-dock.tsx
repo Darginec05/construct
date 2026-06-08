@@ -4,7 +4,7 @@ import { Copilot } from "./copilot.tsx";
 import { Inspector } from "./inspector.tsx";
 import { TestPanel } from "./test-panel.tsx";
 import { Tabs, TabsIndicator, TabsList, TabsPanel, TabsTab } from "./ui/tabs.tsx";
-import { useFlow } from "../flow/flow-context.tsx";
+import { useWorkspace } from "../flow/workspace-context.tsx";
 
 type TabId = "copilot" | "test" | "inspector";
 
@@ -15,7 +15,7 @@ const TABS: { id: TabId; icon: LucideIcon; label: string }[] = [
 ];
 
 export function RightDock() {
-  const { selectedId } = useFlow();
+  const { selectedId } = useWorkspace();
   const [tab, setTab] = useState<TabId>("inspector");
 
   useEffect(() => {

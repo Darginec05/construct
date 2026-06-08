@@ -2,10 +2,10 @@ import { useMemo } from "react";
 import { ChevronRight, Merge, Repeat } from "lucide-react";
 import { catalogEntry, CATEGORY_META } from "../lib/catalog.ts";
 import { orderFlow, summarize } from "../lib/order-flow.ts";
-import { useFlow } from "../flow/flow-context.tsx";
+import { useWorkspace } from "../flow/workspace-context.tsx";
 
 export function ReaderView() {
-  const { nodes, edges, selectedId, setSelectedId, activeFlow } = useFlow();
+  const { nodes, edges, selectedId, setSelectedId, activeFlow } = useWorkspace();
   const { order, back, byId } = useMemo(() => orderFlow(nodes, edges), [nodes, edges]);
 
   return (

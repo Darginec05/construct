@@ -1,6 +1,6 @@
 import { anthropic, defineFlow, defineTool, type FlowDefinition } from "@construct/sdk";
 import { z } from "zod";
-import type { FlowDoc } from "../flow/flow-context.tsx";
+import type { FlowDoc } from "../flow/types.ts";
 import { fromDslFlow } from "../flow/serialize.ts";
 
 export interface ExampleDef {
