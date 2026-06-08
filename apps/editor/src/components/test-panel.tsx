@@ -1,5 +1,8 @@
-import { CircleDot, FlaskConical, Loader2, Play, Plus, Server } from "lucide-react";
-import { type RunMode, useFlow } from "../flow/flow-context.tsx";
+import { CircleDot, FlaskConical, Loader2, Play, Plus, Server, UserCheck } from "lucide-react";
+import { type PendingHuman, type RunMode, useFlow } from "../flow/flow-context.tsx";
+import { catalogEntry } from "../lib/catalog.ts";
+import { fieldLabel } from "../lib/labels.ts";
+import { Markdown } from "./markdown.tsx";
 import { ToggleGroup, ToggleItem } from "./ui/toggle-group.tsx";
 
 const inputCls =
@@ -13,6 +16,9 @@ export function TestPanel() {
     setRunMode,
     serverConfigured,
     trace,
+    streamByNode,
+    pendingHuman,
+    resolveHuman,
     runOutput,
     runError,
     inputValues,
@@ -97,6 +103,12 @@ export function TestPanel() {
         </div>
 
         {trace.length > 0 ? <Trace /> : null}
+        {Object.keys(streamByNode).length > 0 ? (
+          <LiveOutput streamByNode={streamByNode} nodes={nodes} running={running} />
+        ) : null}
+        {pendingHuman ? (
+          <ApprovalCard pending={pendingHuman} nodes={nodes} onDecide={resolveHuman} />
+        ) : null}
         {runError ? (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-[12px] text-destructive">
             {runError}
@@ -192,6 +204,85 @@ function Trace() {
   );
 }
 
+function exitTone(handle: string): string {
+  const h = handle.toLowerCase();
+  if (/reject|deny|decline|cancel/.test(h))
+    return "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20";
+  if (/approv|accept|confirm|continue/.test(h))
+    return "bg-primary text-primary-foreground hover:opacity-90";
+  return "border border-border hover:bg-accent";
+}
+
+function ApprovalCard({
+  pending,
+  nodes,
+  onDecide,
+}: {
+  pending: PendingHuman;
+  nodes: { id: string; data: { type: string } }[];
+  onDecide: (handle: string) => void;
+}) {
+  const type = nodes.find((n) => n.id === pending.nodeId)?.data.type;
+  const label = (type ? catalogEntry(type)?.label : undefined) ?? type ?? "Human";
+  return (
+    <div className="rounded-md border border-[hsl(var(--cat-control)/0.4)] bg-[hsl(var(--cat-control)/0.08)] p-3">
+      <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-[hsl(var(--cat-control))]">
+        <UserCheck size={14} /> Waiting for your decision
+      </div>
+      <div className="mb-2.5 text-[12px] text-muted-foreground">
+        <span className="font-medium text-foreground">{label}</span>
+        <span className="ml-1 font-mono text-[10px]">{pending.nodeId}</span>
+        {" — pick an outcome to continue the run."}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {pending.exits.map((exit) => (
+          <button
+            key={exit}
+            type="button"
+            onClick={() => onDecide(exit)}
+            className={`rounded-md px-3 py-1.5 text-[12px] font-medium transition ${exitTone(exit)}`}
+          >
+            {fieldLabel(exit)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LiveOutput({
+  streamByNode,
+  nodes,
+  running,
+}: {
+  streamByNode: Record<string, string>;
+  nodes: { id: string; data: { type: string } }[];
+  running: boolean;
+}) {
+  const entries = Object.entries(streamByNode).filter(([, text]) => text.length > 0);
+  if (entries.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        Live output
+        {running ? <Loader2 size={11} className="animate-spin" /> : null}
+      </div>
+      <div className="space-y-2">
+        {entries.map(([nodeId, text]) => {
+          const type = nodes.find((n) => n.id === nodeId)?.data.type;
+          const label = (type ? catalogEntry(type)?.label : undefined) ?? type ?? nodeId;
+          return (
+            <div key={nodeId} className="rounded-md border border-border bg-muted/40 px-2.5 py-2">
+              <div className="mb-1 font-mono text-[10px] text-muted-foreground">{label}</div>
+              <Markdown text={text} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Output({ value }: { value: unknown }) {
   const bundle =
     value !==null && typeof value === "object" && !Array.isArray(value)
@@ -212,11 +303,21 @@ function Output({ value }: { value: unknown }) {
             {bundle.map(([key, val]) => (
               <div key={key} className="bg-muted/40 px-2.5 py-2">
                 <dt className="mb-0.5 font-mono text-[11px] text-muted-foreground">{key}</dt>
-                <dd className="whitespace-pre-wrap text-[12px]">{scalarText(val)}</dd>
+                <dd className="min-w-0">
+                  {typeof val === "string" ? (
+                    <Markdown text={val} />
+                  ) : (
+                    <pre className="whitespace-pre-wrap text-[12px]">{scalarText(val)}</pre>
+                  )}
+                </dd>
               </div>
             ))}
           </dl>
         )
+      ) : typeof value === "string" ? (
+        <div className="rounded-md border border-border bg-muted/40 px-2.5 py-2">
+          <Markdown text={value} />
+        </div>
       ) : (
         <pre className="whitespace-pre-wrap rounded-md border border-border bg-muted/40 px-2.5 py-2 text-[12px]">
           {scalarText(value)}

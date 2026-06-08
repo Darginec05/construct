@@ -1,4 +1,4 @@
-import { runFlow, type RunEvent, type RunResult } from "@construct/engine";
+import { runFlow, type RunEvent, type RunOptions, type RunResult } from "@construct/engine";
 import { createFakeProvider, registerProvider } from "@construct/providers";
 // Side-effect import: registers the agent / classifier / tool / retrieve executors.
 import "@construct/nodes";
@@ -24,8 +24,9 @@ export function executeFlow(
   all: FlowDoc[],
   input: Record<string, unknown>,
   onEvent: (event: RunEvent) => void,
+  onHuman?: RunOptions["onHuman"],
 ): Promise<RunResult> {
   ensureRuntime();
   const flows = Object.fromEntries(all.map((f) => [f.id, toDslFlow(f)]));
-  return runFlow(toDslFlow(active), { input, flows, onEvent });
+  return runFlow(toDslFlow(active), { input, flows, onEvent, onHuman });
 }

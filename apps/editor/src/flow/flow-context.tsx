@@ -7,8 +7,8 @@ import {
   type OnEdgesChange,
   type OnNodesChange,
 } from "reactflow";
-import { validateFlow, type Resource, type ValidationIssue } from "@construct/dsl";
-import type { RunEvent } from "@construct/engine";
+import { resolveNodeOutputs, validateFlow, type Resource, type ValidationIssue } from "@construct/dsl";
+import type { HumanDecision, RunEvent } from "@construct/engine";
 import { executeFlow } from "../lib/runtime.ts";
 import { constructClient } from "../lib/server.ts";
 import { toDslFlow } from "./serialize.ts";
@@ -22,6 +22,11 @@ export type NodeRunState = "running" | "done" | "error";
 export type PublishStatus = "idle" | "publishing" | "done" | "error";
 /** Where a Run executes: the in-browser fake sandbox, or a real self-host server. */
 export type RunMode = "sandbox" | "server";
+
+export interface PendingHuman {
+  nodeId: string;
+  exits: string[];
+}
 
 export interface FlowDoc {
   id: string;
@@ -136,6 +141,12 @@ interface FlowStore {
   setRunMode: (mode: RunMode) => void;
   nodeRun: Record<string, NodeRunState>;
   trace: RunEvent[];
+  /** Streamed `token` text accumulated per node during a run. */
+  streamByNode: Record<string, string>;
+  /** A human node awaiting an inline approve/reject decision (sandbox runs). */
+  pendingHuman: PendingHuman | null;
+  /** Resolve the pending human pause by following one of its exit handles. */
+  resolveHuman: (handle: string) => void;
   runOutput: unknown;
   runError: string | null;
   inputValues: Record<string, string>;
@@ -168,6 +179,13 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
   );
   const [nodeRun, setNodeRun] = useState<Record<string, NodeRunState>>({});
   const [trace, setTrace] = useState<RunEvent[]>([]);
+  const [streamByNode, setStreamByNode] = useState<Record<string, string>>({});
+  const [pendingHuman, setPendingHuman] = useState<PendingHuman | null>(null);
+  // Resolver for the in-flight `onHuman` promise; set while a sandbox run is
+  // paused at a human node, cleared when the decision is made or the run aborts.
+  const humanResolveRef = useRef<((d: HumanDecision) => void) | null>(null);
+  // Per-run token; flipping `aborted` makes a stale run's terminal setters no-op.
+  const runTokenRef = useRef<{ aborted: boolean } | null>(null);
   const [runOutput, setRunOutput] = useState<unknown>(undefined);
   const [runError, setRunError] = useState<string | null>(null);
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
@@ -352,13 +370,33 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     setInputValues((v) => ({ ...v, [key]: value }));
   }, []);
 
+  // Abort any in-flight run and release a pending human pause. The empty handle
+  // matches no edge, so the abandoned engine run unwinds and its (token-guarded)
+  // terminal setters are skipped.
+  const abortRun = useCallback(() => {
+    if (runTokenRef.current) runTokenRef.current.aborted = true;
+    const resolve = humanResolveRef.current;
+    humanResolveRef.current = null;
+    setPendingHuman(null);
+    resolve?.({ handle: "" });
+  }, []);
+
+  const resolveHuman = useCallback((handle: string) => {
+    const resolve = humanResolveRef.current;
+    humanResolveRef.current = null;
+    setPendingHuman(null);
+    resolve?.({ handle });
+  }, []);
+
   const clearRun = useCallback(() => {
+    abortRun();
     setRunStatus("idle");
     setNodeRun({});
     setTrace([]);
+    setStreamByNode({});
     setRunOutput(undefined);
     setRunError(null);
-  }, []);
+  }, [abortRun]);
 
   const loadWorkspace = useCallback(
     (docs: FlowDoc[]) => {
@@ -379,9 +417,13 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
 
   const runActiveFlow = useCallback(async () => {
     const { activeFlow, flows, inputValues, runMode } = snapRef.current;
+    abortRun();
+    const token = { aborted: false };
+    runTokenRef.current = token;
     setRunStatus("running");
     setNodeRun({});
     setTrace([]);
+    setStreamByNode({});
     setRunOutput(undefined);
     setRunError(null);
 
@@ -394,33 +436,49 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
     }
 
     const onEvent = (event: RunEvent) => {
+      if (token.aborted) return;
       setTrace((t) => [...t, event]);
       if (event.nodeId == null) return;
       const id = event.nodeId;
       if (event.type === "node-start") setNodeRun((m) => ({ ...m, [id]: "running" }));
       else if (event.type === "node-finish") setNodeRun((m) => ({ ...m, [id]: "done" }));
       else if (event.type === "error") setNodeRun((m) => ({ ...m, [id]: "error" }));
+      else if (event.type === "token" && typeof event.data === "string") {
+        const chunk = event.data;
+        setStreamByNode((m) => ({ ...m, [id]: (m[id] ?? "") + chunk }));
+      }
     };
+
+    // Inline human approval: hold the run open on a promise the UI resolves when
+    // the user picks an exit. Sandbox-only — server runs pause durably instead.
+    const onHuman = (node: { id: string; type: string; config: Record<string, unknown> }) =>
+      new Promise<HumanDecision>((resolve) => {
+        humanResolveRef.current = resolve;
+        setPendingHuman({ nodeId: node.id, exits: resolveNodeOutputs(node.type, node.config) });
+      });
 
     try {
       if (runMode === "server" && constructClient) {
         // Real provider calls happen server-side; subflows resolve from the
         // server's store, so a multi-flow workspace must be published first.
         const record = await constructClient.runStream(toDslFlow(activeFlow), input, onEvent);
+        if (token.aborted) return;
         setRunStatus(record.status);
         setRunOutput(record.output);
         setRunError(record.error ?? null);
       } else {
-        const result = await executeFlow(activeFlow, flows, input, onEvent);
+        const result = await executeFlow(activeFlow, flows, input, onEvent, onHuman);
+        if (token.aborted) return;
         setRunStatus(result.status);
         setRunOutput(result.output);
         setRunError(result.error ?? null);
       }
     } catch (err) {
+      if (token.aborted) return;
       setRunStatus("failed");
       setRunError(err instanceof Error ? err.message : String(err));
     }
-  }, []);
+  }, [abortRun]);
 
   const publishWorkspace = useCallback(async () => {
     if (!constructClient) return;
@@ -470,6 +528,9 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       setRunMode,
       nodeRun,
       trace,
+      streamByNode,
+      pendingHuman,
+      resolveHuman,
       runOutput,
       runError,
       inputValues,
@@ -506,6 +567,9 @@ export function FlowProvider({ children }: { children: React.ReactNode }) {
       runMode,
       nodeRun,
       trace,
+      streamByNode,
+      pendingHuman,
+      resolveHuman,
       runOutput,
       runError,
       inputValues,
