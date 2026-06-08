@@ -107,7 +107,7 @@ export function TopBar({
         </span>
       </div>
 
-      {/* <Select value={exampleSel} onValueChange={(v: string | null) => onPickExample(v)}>
+      <Select value={exampleSel} onValueChange={(v: string | null) => onPickExample(v)}>
         <SelectTrigger className="ml-2 h-8 w-[148px] text-[12px]" title="Load a ready-made example">
           <SelectValue placeholder="Examples" />
         </SelectTrigger>
@@ -118,7 +118,7 @@ export function TopBar({
             </SelectItem>
           ))}
         </SelectContent>
-      </Select> */}
+      </Select>
 
       <ToggleGroup
         value={[view]}

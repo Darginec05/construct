@@ -10,6 +10,6 @@ if (!root) throw new Error("#root not found");
 
 createRoot(root).render(
   <StrictMode>
-    <ConstructEditor client={constructClient} slots={{ copilot: null }}/>
+    <ConstructEditor client={constructClient} slots={{ copilot: null }} initialFlows={INITIAL_FLOWS} />
   </StrictMode>,
 );
