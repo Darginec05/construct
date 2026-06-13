@@ -44,41 +44,154 @@ referenced from it by name. No part of the stack is privileged.
   retrieval are leaves resolved through a registry.
 - **Safety is first-class.** Tools carry a tier (read → dangerous); write-class
   actions can be routed through a human-approval node before they run.
+- **The editor is an embeddable library.** `@construct/editor` exports a single
+  `<ConstructEditor>` you drop into any React host; it extends by composition
+  (props, slots, a DSL facade) so downstream apps never fork it.
 
 ## How the pieces fit
 
 ```
-   Editor (apps/editor) ── visual authoring
-              │ serializes to
-              ▼
-     @construct/dsl  ── the versioned Flow contract
-              │
-   ┌──────────┼───────────────┐
-   ▼          ▼               ▼
- validate   engine          nodes
-            (runtime)       (agent / classifier / tool / retrieve)
-                                │ uses
-                  ┌─────────────┼──────────────┐
-                  ▼             ▼               ▼
-              providers       tools            rag
-              (LLMs)          (+ MCP)          (vector stores)
+   @construct/editor ── <ConstructEditor> embeddable React canvas
+   (host: apps/editor)        │ serializes to
+                              ▼
+                     @construct/dsl  ── the versioned Flow contract
+                              │
+           ┌──────────────────┼───────────────┐
+           ▼                  ▼               ▼
+         validate           engine          nodes
+                            (runtime)       (agent / classifier / tool / retrieve)
+                                                │ uses
+                                  ┌─────────────┼──────────────┐
+                                  ▼             ▼               ▼
+                              providers       tools            rag
+                              (LLMs)          (+ MCP)          (vector stores)
 
    @construct/sdk    — fluent SDK to author flows in code (compiles to the contract)
    @construct/server — host the engine behind a REST API + SSE + persistence
    @construct/client — programmatic client for that API
 ```
 
-## Quick start
+## Getting Started
+
+### Prerequisites
+
+- **Node >= 22** (`.nvmrc` pins the version — `nvm use` if you have nvm)
+- **Yarn 1.x** (the repo is a Yarn + Turborepo monorepo)
+
+### Install & run
 
 ```bash
+git clone https://github.com/Darginec05/construct.git
+cd construct
 yarn install
-yarn build       # turbo run build
-yarn dev         # turbo run dev — editor + watch builds
-yarn typecheck
-yarn test
+yarn dev          # turbo run dev — starts the editor playground + watch builds
 ```
 
-Requires **Node >= 22**.
+`yarn dev` brings up the visual editor at **http://localhost:5173** (the
+`apps/editor` playground host). The canvas, inspector, live validation, and reader
+view work out of the box against a simulated model provider — no API keys required
+to explore.
+
+Common workspace tasks (all via Turborepo):
+
+```bash
+yarn build        # build every package
+yarn typecheck    # type-check the whole monorepo
+yarn test         # run the test suites
+yarn lint
+```
+
+### Connect a self-host server (optional)
+
+By default the editor is a pure sandbox: runs use a simulated provider and
+**Publish is disabled**. To target a real self-hosted engine
+(`@construct/server`), point the playground at it via build-time env. Copy
+`apps/editor/.env.example` to `apps/editor/.env` and set:
+
+```bash
+VITE_CONSTRUCT_SERVER_URL=http://localhost:8787
+VITE_CONSTRUCT_API_KEY=secret   # only if the server requires a token
+```
+
+> The **host** (`apps/editor`) is the only place that reads env. The
+> `@construct/editor` library never touches `VITE_*` — the host constructs a
+> `ConstructClient` and injects it, so no key is ever baked into the library
+> bundle.
+
+### Embed the editor in your own app
+
+`@construct/editor` exports one component plus a DSL facade. The host owns the
+server connection, the initial flows, and persistence; the editor owns the canvas.
+
+```tsx
+import { ConstructEditor, type WorkspaceFlowInput, type WorkspaceFlow } from "@construct/editor";
+import "@construct/editor/styles.css";
+
+const initialFlows: WorkspaceFlowInput[] = [
+  {
+    kind: "main",
+    flow: {
+      id: "main",
+      name: "Assistant",
+      nodes: [
+        { id: "in", type: "input", config: { schema: { message: "text" } }, position: { x: 0, y: 120 } },
+        { id: "ag", type: "agent", config: { model: { provider: "anthropic", model: "claude-sonnet-4-6" }, prompt: "{{ $.message }}", writeTo: "reply" }, position: { x: 320, y: 120 } },
+        { id: "out", type: "output", config: { from: "$.reply" }, position: { x: 640, y: 120 } },
+      ],
+      edges: [
+        { id: "e1", source: "in", target: "ag" },
+        { id: "e2", source: "ag", target: "out" },
+      ],
+    },
+  },
+];
+
+export function App() {
+  return (
+    <ConstructEditor
+      client={null}                                  // null = sandbox; inject a ConstructClient to enable Publish
+      initialFlows={initialFlows}                     // uncontrolled seed, read once at mount
+      onFlowChange={(flow: WorkspaceFlow) => save(flow)} // debounced, per changed flow, speaks DSL
+    />
+  );
+}
+```
+
+Tailwind hosts can pull in the editor's design tokens via the shipped preset:
+
+```js
+// tailwind.config.js
+import editorPreset from "@construct/editor/tailwind-preset";
+
+export default {
+  presets: [editorPreset],
+  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+};
+```
+
+**Extension seams.** The editor exposes two stable seams so downstream apps (e.g.
+a hosted copilot) extend it without forking:
+
+- **`slots.copilot`** — a mount point that replaces the right-dock "Copilot" tab.
+  Pass your own panel; it renders *inside* the editor's provider tree, so it can
+  drive the canvas.
+- **`useEditorApi()`** — a facade over the canvas that speaks the canonical DSL:
+  `getActiveFlow(): Flow`, `applyFlow(flow)` (one undo commit + revalidate),
+  `focusNode(id)`, `getIssues()`.
+
+```tsx
+import { ConstructEditor, useEditorApi } from "@construct/editor";
+
+function MyCopilot() {
+  const api = useEditorApi();
+  // read the active flow as DSL, send it somewhere, then apply a patched flow back
+  const flow = api.getActiveFlow();
+  // ...
+  // api.applyFlow(patchedFlow);
+}
+
+<ConstructEditor client={null} slots={{ copilot: <MyCopilot /> }} />;
+```
 
 ## Author a flow in code
 
@@ -119,13 +232,17 @@ packages/
   sdk/         @construct/sdk         fluent SDK to author flows in code
   client/      @construct/client      programmatic client for the server API
   server/      @construct/server      REST API + SSE streaming + persistence
+  editor/      @construct/editor      embeddable <ConstructEditor> React library
 apps/
-  editor/      visual flow editor (React)
+  editor/      @construct/playground  thin host that mounts <ConstructEditor> (owns env, demo flows)
+  docs/        @construct/docs         documentation site
 ```
 
 Dependencies point **inward** toward the DSL. `engine` depends only on `dsl`;
-`nodes` depends on `dsl` + `engine` + `providers` + `tools` + `rag`. Nothing
-depends on the editor.
+`nodes` depends on `dsl` + `engine` + `providers` + `tools` + `rag`. The
+`@construct/editor` library is consumed *from source* inside the monorepo
+(`exports["."] = "./src/index.ts"`); nothing the runtime depends on imports the
+editor.
 
 ## Status
 
@@ -144,7 +261,8 @@ An honest snapshot — ✅ implemented · 🚧 partial · 📋 planned. See
 | `@construct/client` | ✅ Thin client: `run`, `runStream` (SSE), `saveFlow` |
 | `@construct/server` | ✅ Hono REST API (flows CRUD, runs, SSE streaming), bearer auth, in-memory + SQLite stores |
 | `@construct/mcp` | ✅ MCP client + adapter mounting MCP server tools into the registry |
-| `apps/editor` | 🚧 Canvas, inspector, live validation, reader view |
+| `@construct/editor` | 🚧 Embeddable `<ConstructEditor>`: canvas, inspector, live validation, reader view; `slots.copilot` + `useEditorApi()` seams; `initialFlows`/`onFlowChange` |
+| `apps/editor` (`@construct/playground`) | ✅ Reference host that mounts the editor and owns env + demo flows |
 
 ## Documentation
 
@@ -169,4 +287,6 @@ local setup, the project conventions, and how to add a node, provider, or tool.
 [Apache License 2.0](LICENSE) — the engine, DSL, nodes, providers, tools, RAG, SDK,
 server, and editor are all permissively licensed. A few things (an AI copilot that
 generates/edits flows, and multi-tenant managed hosting) are intentionally out of
-scope for this repo; see [architecture.md](docs/architecture.md#scope).
+scope for this repo; see [architecture.md](docs/architecture.md#scope). The editor
+ships the **seams** for that copilot (`slots.copilot`, `useEditorApi()`), but the
+copilot implementation itself lives downstream.
