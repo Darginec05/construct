@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { defineTool, registerTool, type Tool } from "./index.js";
+import { defineTool, registerTool } from "./tool-base.js";
+import type { Tool } from "./index.js";
 
 /**
  * A deliberately tiny set of safe, read-tier built-ins. These are NOT registered
