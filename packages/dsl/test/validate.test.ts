@@ -13,7 +13,7 @@ function makeFlow(overrides: Partial<Flow> = {}): Flow {
     id: "f",
     name: "n",
     nodes: [
-      { id: "in", type: "input", config: {} },
+      { id: "in", type: "input", config: { schema: { x: "text" } } },
       { id: "out", type: "output", config: { from: "$.x" } },
     ],
     edges: [{ id: "e", source: "in", target: "out" }],
@@ -91,32 +91,51 @@ describe("validateFlow — config & references", () => {
     expect(errs.some((e) => e.nodeId === "a")).toBe(true);
   });
 
-  it("flags a writeTo to an undeclared channel", () => {
+  it("no longer errors on a writeTo to an undeclared channel (it defines a variable)", () => {
     const flow = makeFlow({
       channels: [],
       nodes: [
-        { id: "t", type: "transform", config: { expr: "$.x", writeTo: "gone" } },
+        { id: "in", type: "input", config: { schema: { x: "text" } } },
+        { id: "t", type: "transform", config: { expr: "$.x", writeTo: "result" } },
+        { id: "out", type: "output", config: { from: "$.result" } },
       ],
-      edges: [],
-    });
-    expect(
-      messages(flow).some((m) => m.includes('undeclared channel "gone"')),
-    ).toBe(true);
-  });
-
-  it("accepts a writeTo to a declared channel", () => {
-    const flow = makeFlow({
-      channels: [{ name: "result", type: "any", reducer: "lastValue" }],
-      nodes: [
-        {
-          id: "t",
-          type: "transform",
-          config: { expr: "$.x", writeTo: "result" },
-        },
+      edges: [
+        { id: "e1", source: "in", target: "t" },
+        { id: "e2", source: "t", target: "out" },
       ],
-      edges: [],
     });
     expect(errors(flow)).toEqual([]);
+    // …and the produced name resolves downstream, so no unknown-variable warning.
+    expect(messages(flow).some((m) => m.includes("unknown variable"))).toBe(false);
+  });
+
+  it("warns on a reference to an unknown variable", () => {
+    const flow = makeFlow({
+      nodes: [
+        { id: "in", type: "input", config: { schema: { x: "text" } } },
+        { id: "out", type: "output", config: { from: "$.ghost" } },
+      ],
+      edges: [{ id: "e", source: "in", target: "out" }],
+    });
+    const issue = validateFlow(flow).find((i) => i.message.includes("unknown variable"));
+    expect(issue?.level).toBe("warning");
+    expect(issue?.message).toContain('unknown variable "ghost"');
+  });
+
+  it("seeds extra names via scopeVariables (loop/map body bindings)", () => {
+    const flow = makeFlow({
+      nodes: [
+        { id: "in", type: "input", config: { schema: {} } },
+        { id: "out", type: "output", config: { from: "$.item" } },
+      ],
+      edges: [{ id: "e", source: "in", target: "out" }],
+    });
+    expect(messages(flow).some((m) => m.includes('unknown variable "item"'))).toBe(true);
+    expect(
+      validateFlow(flow, { scopeVariables: ["item", "index"] }).some((i) =>
+        i.message.includes("unknown variable"),
+      ),
+    ).toBe(false);
   });
 
   it("flags a tool bound to an undeclared resource", () => {

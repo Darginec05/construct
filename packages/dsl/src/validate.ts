@@ -1,10 +1,13 @@
-import type { Flow, FlowNode } from "./flow.js";
+import type { Flow } from "./flow.js";
 import { getNodeSpec, resolveNodeOutputs } from "./nodes.js";
+import { flowVariableNames } from "./variables.js";
+import { expressionRefs } from "./expr-tokens.js";
 
 /**
  * Semantic validation, layered on top of the structural `parseFlow`. It checks
  * each node's config against the catalog, that edges connect real nodes and
- * valid handles, and that channel / resource references resolve.
+ * valid handles, that resource references resolve, and that every `$.x` /
+ * `{{x}}` reference names a variable the flow actually exposes.
  */
 
 export interface ValidationIssue {
@@ -14,13 +17,26 @@ export interface ValidationIssue {
   edgeId?: string;
 }
 
-/** Fields that, by convention, name the channel a node writes its result to. */
-function writeTargetOf(node: FlowNode): string | undefined {
-  const w = (node.config as Record<string, unknown>).writeTo;
-  return typeof w === "string" ? w : undefined;
+export interface ValidateOptions {
+  /**
+   * Variable names seeded from the enclosing context, beyond the flow's own
+   * registry — e.g. `["item", "index"]` when validating a loop/map body.
+   */
+  scopeVariables?: string[];
 }
 
-export function validateFlow(flow: Flow): ValidationIssue[] {
+/** Collect the root variable names referenced by any expression in a value tree. */
+function collectRefs(value: unknown, into: Set<string>): void {
+  if (typeof value === "string") {
+    for (const ref of expressionRefs(value)) into.add(ref);
+  } else if (Array.isArray(value)) {
+    for (const v of value) collectRefs(v, into);
+  } else if (value && typeof value === "object") {
+    for (const v of Object.values(value)) collectRefs(v, into);
+  }
+}
+
+export function validateFlow(flow: Flow, opts: ValidateOptions = {}): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   const nodeIds = new Set<string>();
@@ -35,8 +51,11 @@ export function validateFlow(flow: Flow): ValidationIssue[] {
     nodeIds.add(node.id);
   }
 
-  const channelNames = new Set(flow.channels.map((c) => c.name));
   const resourceNames = new Set(flow.resources.map((r) => r.name));
+  // Every name the flow exposes (input fields ∪ channels ∪ writeTo producers),
+  // plus any seeded by the caller (loop/map body bindings).
+  const knownVars = flowVariableNames(flow);
+  for (const name of opts.scopeVariables ?? []) knownVars.add(name);
 
   // Per-node: catalog config validation + reference checks.
   for (const node of flow.nodes) {
@@ -62,13 +81,18 @@ export function validateFlow(flow: Flow): ValidationIssue[] {
       }
     }
 
-    const writeTo = writeTargetOf(node);
-    if (writeTo && !channelNames.has(writeTo)) {
-      issues.push({
-        level: "error",
-        nodeId: node.id,
-        message: `writes to undeclared channel "${writeTo}"`,
-      });
+    // A `writeTo` no longer needs a pre-declared channel — it defines a
+    // variable. But every *read* (`$.x` / `{{x}}`) must resolve to a known one.
+    const refs = new Set<string>();
+    collectRefs(node.config, refs);
+    for (const ref of refs) {
+      if (!knownVars.has(ref)) {
+        issues.push({
+          level: "warning",
+          nodeId: node.id,
+          message: `references unknown variable "${ref}"`,
+        });
+      }
     }
 
     if (node.type === "tool") {
@@ -141,8 +165,8 @@ export function validateFlow(flow: Flow): ValidationIssue[] {
 }
 
 /** Parse-and-validate convenience: throws if there are any error-level issues. */
-export function assertValidFlow(flow: Flow): void {
-  const errors = validateFlow(flow).filter((i) => i.level === "error");
+export function assertValidFlow(flow: Flow, opts: ValidateOptions = {}): void {
+  const errors = validateFlow(flow, opts).filter((i) => i.level === "error");
   if (errors.length > 0) {
     const lines = errors.map(
       (e) => `  - ${e.nodeId ?? e.edgeId ?? "flow"}: ${e.message}`,
