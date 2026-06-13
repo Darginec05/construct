@@ -157,18 +157,53 @@ interface RouterClass {
 /** Reserved handle for the router's "no class fit" branch. */
 const ROUTER_FALLBACK = "fallback";
 
+/** Tool the router must call to commit to exactly one branch. */
+const ROUTE_TOOL = "select_route";
+
 /**
- * Pick the class the model named. Prefer a whole-word hit so "bill" doesn't
- * swallow "billing"; fall back to substring, then to the longest name first so
- * a more specific label wins over a prefix of it.
+ * Resolve free text to one of `names`. Prefer an exact (case-insensitive) hit;
+ * then a whole-word match so "bill" doesn't swallow "billing"; then a substring,
+ * longest name first so a more specific label wins over a prefix of it. Used to
+ * canonicalize the model's pick and as a backstop when a provider answers in
+ * prose instead of calling the tool.
  */
 function matchClass(text: string, names: string[]): string | undefined {
+  const lower = text.trim().toLowerCase();
+  const exact = names.find((c) => c.toLowerCase() === lower);
+  if (exact) return exact;
   const ranked = [...names].sort((a, b) => b.length - a.length);
   for (const c of ranked) {
     const word = new RegExp(`\\b${c.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
-    if (word.test(text)) return c;
+    if (word.test(lower)) return c;
   }
-  return ranked.find((c) => text.includes(c.toLowerCase()));
+  return ranked.find((c) => lower.includes(c.toLowerCase()));
+}
+
+/**
+ * The forced-choice tool: a single `route` enum constrains the model to one of
+ * the branch names, and a `reason` (asked first, so the model commits to a
+ * rationale before the label) is streamed back for observability.
+ */
+function routeTool(choices: string[]): ToolSpec {
+  return {
+    name: ROUTE_TOOL,
+    description: "Commit to exactly one branch for the input.",
+    parameters: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "One sentence: why this branch fits the input.",
+        },
+        route: {
+          type: "string",
+          enum: choices,
+          description: "The branch to take. Must be one of the listed names.",
+        },
+      },
+      required: ["reason", "route"],
+    },
+  };
 }
 
 /** Render the choices for the system prompt: "name — description" per line. */
@@ -184,8 +219,11 @@ function describeClasses(classes: RouterClass[], fallback: boolean): string {
 
 /**
  * `router`: forced choice among `classes`; the chosen class name is the handle.
- * The model reads each class description to decide. When `fallback` is on, a
- * no-match routes to the "fallback" handle instead of the first class.
+ * The model reads each class description and commits by calling the `select_route`
+ * tool, whose `route` arg is an enum of the branch names — a constrained choice
+ * that can't drift into prose. Routing runs at temperature 0 by default so the
+ * same input always takes the same branch. When `fallback` is on, "none fit / not
+ * confident" routes to the "fallback" handle instead of the first class.
  */
 async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
   const model = ctx.config.model as ModelRef | undefined;
@@ -193,25 +231,39 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
   const classes = (ctx.config.classes as RouterClass[]) ?? [];
   const fallback = ctx.config.fallback === true;
   const names = classes.map((c) => c.name);
+  const choices = fallback ? [...names, ROUTER_FALLBACK] : names;
   const prompt = ctx.evaluate(ctx.config.prompt);
 
-  const choices = fallback ? [...names, ROUTER_FALLBACK] : names;
   const res = await provider.chat(
     [
       {
         role: "system",
         content:
-          `Route the input to exactly one of the following branches. ` +
-          `Respond with only the branch name.\n\n${describeClasses(classes, fallback)}`,
+          `Route the input to exactly one branch by calling the ${ROUTE_TOOL} tool. ` +
+          `Pick the branch whose description best matches the input.\n\n` +
+          describeClasses(classes, fallback),
       },
       { role: "user", content: prompt == null ? "" : String(prompt) },
     ],
-    { model: model!.model },
+    {
+      model: model!.model,
+      temperature: model!.temperature ?? 0,
+      maxTokens: model!.maxTokens ?? 256,
+      tools: [routeTool(choices)],
+      toolChoice: "required",
+    },
   );
-  const text = res.text.trim().toLowerCase();
 
-  const matched = matchClass(text, choices);
-  const chosen = matched ?? (fallback ? ROUTER_FALLBACK : names[0] ?? "out");
+  // Read the committed route from the tool call; if a provider ignored the
+  // forced tool and answered in prose, fall back to matching its text.
+  const call = res.toolCalls?.find((c) => c.name === ROUTE_TOOL);
+  const picked =
+    call && typeof call.arguments.route === "string" ? call.arguments.route : res.text;
+  const reason =
+    call && typeof call.arguments.reason === "string" ? call.arguments.reason : "";
+  if (reason) ctx.onDelta(reason);
+
+  const chosen = matchClass(picked, choices) ?? (fallback ? ROUTER_FALLBACK : names[0] ?? "out");
   return { ...patch(ctx.config.writeTo, chosen), handle: chosen };
 }
 

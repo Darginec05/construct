@@ -85,14 +85,37 @@ export type RouterClass = z.infer<typeof RouterClassSchema>;
  * "fallback" handle catches inputs that match no class — wire it to a default
  * specialist or a clarifying question instead of silently picking the first.
  */
-const RouterConfig = z.object({
-  model: ModelRefSchema,
-  prompt: ExprSchema.optional(),
-  classes: z.array(RouterClassSchema).min(1),
-  /** Add a built-in "fallback" handle for low-confidence / no-match inputs. */
-  fallback: z.boolean().optional(),
-  writeTo: z.string().optional(),
-});
+const RouterConfig = z
+  .object({
+    model: ModelRefSchema,
+    prompt: ExprSchema.optional(),
+    classes: z.array(RouterClassSchema).min(1),
+    /** Add a built-in "fallback" handle for low-confidence / no-match inputs. */
+    fallback: z.boolean().optional(),
+    writeTo: z.string().optional(),
+  })
+  .superRefine((cfg, ctx) => {
+    const names = cfg.classes.map((c) => c.name);
+    const seen = new Set<string>();
+    for (const name of names) {
+      const key = name.toLowerCase();
+      if (seen.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["classes"],
+          message: `duplicate route name "${name}"`,
+        });
+      }
+      seen.add(key);
+      if (key === "fallback") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["classes"],
+          message: `"fallback" is reserved — turn on the fallback option instead of naming a route "fallback"`,
+        });
+      }
+    }
+  });
 
 // --- control ----------------------------------------------------------------
 
