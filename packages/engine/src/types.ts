@@ -15,9 +15,16 @@ export interface RunEvent {
     | "run-finish"
     | "paused"
     | "token"
+    | "usage"
     | "error";
   nodeId?: string;
   data?: unknown;
+}
+
+/** Token accounting for one model turn, surfaced via `usage` events. */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
 }
 
 /** A human node's pending decision, supplied by the host (or a test). */
@@ -58,6 +65,26 @@ export interface RunOptions {
   initialState?: RunState;
   /** Flows referenced by subflow / loop / map bodies, keyed by flow id. */
   flows?: Record<string, Flow>;
+  /**
+   * Per-run model providers, keyed by provider id (e.g. "anthropic"). The engine
+   * forwards these to executors via `ExecutorContext.getProvider` WITHOUT knowing
+   * what a provider is (it stays model-agnostic — hence `unknown`). When absent,
+   * executors fall back to the global `registerProvider` registry, so existing
+   * single-tenant hosts are unaffected. A multi-tenant host (the cloud runner)
+   * uses this to inject a different tenant's decrypted key per run, avoiding the
+   * global registry's cross-run key races.
+   */
+  providers?: Record<string, unknown>;
+  /**
+   * Per-run tools, keyed by tool name. Mirrors {@link providers}: the engine
+   * forwards these to executors via `ExecutorContext.getTool` WITHOUT knowing
+   * what a tool is (it stays tool-agnostic — hence `unknown`). When absent,
+   * executors fall back to the global `registerTool` registry, so existing
+   * single-tenant hosts are unaffected. A multi-tenant host (the cloud runner)
+   * uses this to inject a tenant's own (e.g. custom) tools per run instead of
+   * leaking them into the process-global registry shared across tenants.
+   */
+  tools?: Record<string, unknown>;
   onEvent?: (event: RunEvent) => void;
   /** Resolves a human pause inline; when absent, the run pauses. */
   onHuman?: (
@@ -80,6 +107,15 @@ export interface RunOptions {
   maxSteps?: number;
   /** Run assertValidFlow before executing. Default true. */
   validate?: boolean;
+  /**
+   * Cooperative cancellation. The worklist checks this between nodes and stops
+   * with a failed result when it is aborted; nested loop/map/subflow runs inherit
+   * it through the same options. It does NOT interrupt a node already in flight
+   * (e.g. an open model stream) — that needs provider-level abort. A host (the
+   * cloud runner) passes the HTTP request signal so a client disconnect stops
+   * scheduling further work instead of running the flow to completion.
+   */
+  signal?: AbortSignal;
 }
 
 export interface RunResult {
@@ -101,6 +137,22 @@ export interface ExecutorContext {
   evaluate(expr: unknown): unknown;
   /** Emit a streamed text chunk as a `token` event for the current node. */
   onDelta(text: string): void;
+  /** Report token usage for one model turn as a `usage` event. */
+  onUsage?: (usage: TokenUsage) => void;
+  /**
+   * Resolve a per-run model provider by id, set from `RunOptions.providers`.
+   * Returns `unknown` because the engine is model-agnostic; provider-aware
+   * executors (@construct/nodes) narrow it and fall back to the global registry
+   * when this is absent or returns undefined.
+   */
+  getProvider?: (id: string) => unknown;
+  /**
+   * Resolve a per-run tool by name, set from `RunOptions.tools`. Returns
+   * `unknown` because the engine is tool-agnostic; tool-aware executors
+   * (@construct/nodes) narrow it and fall back to the global registry when this
+   * is absent or returns undefined.
+   */
+  getTool?: (name: string) => unknown;
   /**
    * Request human approval for a gated tool call. The engine injects the
    * current node id. Absent when the host configured no approver — callers must

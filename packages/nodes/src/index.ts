@@ -6,9 +6,12 @@ import {
 import {
   getProvider,
   type ChatMessage,
+  type ChatOptions,
+  type ChatResult,
+  type ModelProvider,
   type ToolSpec,
 } from "@construct/providers";
-import { getTool, needsApproval, runTool } from "@construct/tools";
+import { getTool, needsApproval, runTool, type Tool } from "@construct/tools";
 import { getStore } from "@construct/rag";
 
 /**
@@ -29,14 +32,23 @@ function patch(writeTo: unknown, value: unknown): ExecutorResult {
   return typeof writeTo === "string" ? { patch: { [writeTo]: value } } : {};
 }
 
-function requireProvider(model: ModelRef | undefined, node: string) {
+function requireProvider(
+  ctx: ExecutorContext,
+  model: ModelRef | undefined,
+  node: string,
+): ModelProvider {
   if (!model) throw new Error(`${node} node: missing "model"`);
-  const provider = getProvider(model.provider);
+  // Prefer the per-run provider the host injected (multi-tenant key isolation);
+  // fall back to the process-global registry for single-tenant / OSS hosts.
+  const provider =
+    (ctx.getProvider?.(model.provider) as ModelProvider | undefined) ??
+    getProvider(model.provider);
   if (!provider) throw new Error(`${node} node: no provider "${model.provider}"`);
   return provider;
 }
 
-/** Structured output: try to parse JSON when a schema was requested. */
+/** Backstop parse: if a provider ignored the structured-output tool and answered
+ *  in prose, try to read JSON out of the text rather than silently dropping it. */
 function parseOutput(output: unknown, text: string): unknown {
   if (output && typeof output === "object" && "schema" in output) {
     try {
@@ -48,10 +60,101 @@ function parseOutput(output: unknown, text: string): unknown {
   return text;
 }
 
+/** Tool the agent calls to return a final answer constrained to `output.schema`. */
+const RESPOND_TOOL = "respond";
+/** Cap on a tool result fed back to the model, so one huge payload can't blow up
+ *  context and cost. Truncated content keeps the head and flags the cut. */
+const MAX_TOOL_RESULT_CHARS = 8000;
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_MS = 250;
+const CALL_TIMEOUT_MS = 60_000;
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max)}… [truncated ${text.length - max} chars]`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Race a promise against a timeout so a hung provider call can't stall a run. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`model call timed out after ${ms}ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+/**
+ * Call the model with bounded retries and exponential backoff. LLM endpoints
+ * are flaky (rate limits, transient 5xx, network blips); one failure shouldn't
+ * abort the whole run, so retry a few times before giving up.
+ */
+async function chatWithRetry(
+  provider: ModelProvider,
+  messages: ChatMessage[],
+  opts: ChatOptions,
+): Promise<ChatResult> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await withTimeout(provider.chat(messages, opts), CALL_TIMEOUT_MS);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < RETRY_ATTEMPTS - 1) await delay(RETRY_BASE_MS * 2 ** attempt);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
+/**
+ * Build the structured-output tool from `output.schema`. Providers constrain the
+ * tool-call arguments to this JSON Schema, so the captured args are schema-shaped
+ * by construction — no separate validator needed. Tool inputs must be objects, so
+ * a non-object schema is wrapped under `value` and unwrapped on capture. `$schema`
+ * is stripped since it isn't a valid tool-parameter key.
+ */
+function structuredTool(schema: Record<string, unknown>): {
+  tool: ToolSpec;
+  unwrap: (args: Record<string, unknown>) => unknown;
+} {
+  const { $schema: _drop, ...clean } = schema;
+  const isObject = clean.type === "object" || "properties" in clean;
+  const parameters = isObject
+    ? clean
+    : { type: "object", properties: { value: clean }, required: ["value"] };
+  return {
+    tool: {
+      name: RESPOND_TOOL,
+      description: "Return the final answer as structured data matching the schema.",
+      parameters,
+    },
+    unwrap: isObject ? (args) => args : (args) => args.value,
+  };
+}
+
+/**
+ * Resolve a tool implementation by name: prefer the per-run tool set the host
+ * injected (tenant-scoped / custom tools), then fall back to the process-global
+ * registry. Mirrors provider resolution in {@link requireProvider}.
+ */
+function resolveToolImpl(ctx: ExecutorContext, name: string): Tool | undefined {
+  return (ctx.getTool?.(name) as Tool | undefined) ?? getTool(name);
+}
+
 /** Resolve a node's declared tool names into specs to advertise to the model. */
-function resolveTools(names: string[]): ToolSpec[] {
+function resolveTools(ctx: ExecutorContext, names: string[]): ToolSpec[] {
   return names.map((name) => {
-    const impl = getTool(name);
+    const impl = resolveToolImpl(ctx, name);
     if (!impl) throw new Error(`agent node: no tool registered as "${name}"`);
     return {
       name: impl.name,
@@ -61,54 +164,120 @@ function resolveTools(names: string[]): ToolSpec[] {
   });
 }
 
+type Budget = { maxTokens?: number; maxSteps?: number; maxUsd?: number };
+
 /**
  * `agent`: a model call that runs a multi-step tool-use loop. Each turn the
- * model may either answer (text, loop ends) or request tool calls, which we
- * execute and feed back as `tool` messages for the next turn. The loop is
- * bounded by `maxSteps`; `toolChoice: "none"` collapses it to one completion.
+ * model may answer, request tool calls (executed and fed back), or — when an
+ * `output.schema` is set — commit a structured result via the `respond` tool.
+ *
+ * Production guarantees layered in here:
+ * - structured output is provider-constrained (the `respond` tool's schema),
+ *   not hoped-for JSON; the captured args are schema-shaped by construction.
+ * - `toolChoice: "required"` forces a tool only on the first turn, then relaxes
+ *   to "auto" so the loop can actually finish instead of looping to `maxSteps`.
+ * - the model call is retried with backoff and bounded by a timeout.
+ * - token usage is accumulated and bounded by `budget` (note: `maxUsd` needs a
+ *   per-model price table this build doesn't ship, so it is not yet enforced).
+ * - tool results are truncated before being fed back.
  */
 async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
   const model = ctx.config.model as ModelRef | undefined;
-  const provider = requireProvider(model, "agent");
+  const provider = requireProvider(ctx, model, "agent");
   const toolNames = (ctx.config.tools as string[] | undefined) ?? [];
   const toolChoice =
-    (ctx.config.toolChoice as "auto" | "required" | "none" | undefined) ??
-    "auto";
-  const tools = toolChoice === "none" ? [] : resolveTools(toolNames);
-  const maxSteps = Math.max(1, Number(ctx.config.maxSteps ?? 8));
+    (ctx.config.toolChoice as "auto" | "required" | "none" | undefined) ?? "auto";
+  const realTools = toolChoice === "none" ? [] : resolveTools(ctx, toolNames);
+
+  const output = ctx.config.output;
+  const schema =
+    output && typeof output === "object" && "schema" in output
+      ? ((output as { schema: Record<string, unknown> }).schema)
+      : undefined;
+  const structured = schema ? structuredTool(schema) : undefined;
+  const tools = structured ? [...realTools, structured.tool] : realTools;
+
+  const budget = ctx.config.budget as Budget | undefined;
+  const stepCap = Math.max(
+    1,
+    Math.min(Number(ctx.config.maxSteps ?? 8), budget?.maxSteps ?? Number.POSITIVE_INFINITY),
+  );
 
   const messages: ChatMessage[] = [];
-  if (typeof ctx.config.system === "string") {
-    messages.push({ role: "system", content: ctx.config.system });
+  let system = typeof ctx.config.system === "string" ? ctx.config.system : "";
+  if (structured) {
+    const note = `When you have the final answer, call the ${RESPOND_TOOL} tool with the structured result. Do not answer in plain text.`;
+    system = system ? `${system}\n\n${note}` : note;
   }
+  if (system) messages.push({ role: "system", content: system });
   const prompt = ctx.evaluate(ctx.config.prompt);
   messages.push({ role: "user", content: prompt == null ? "" : String(prompt) });
 
-  let text = "";
+  let totalTokens = 0;
+  let finalText = "";
+  let result: unknown;
+  let gotResult = false;
   let pendingTools = false;
-  for (let step = 0; step < maxSteps; step++) {
-    const res = await provider.chat(messages, {
+
+  for (let step = 0; step < stepCap; step++) {
+    // Force a tool only on the first turn for "required" (commit to acting),
+    // then relax so the model can finish. With a structured schema, keep forcing
+    // a tool so the model can't answer in prose — it must call `respond`.
+    const choice: "auto" | "required" | "none" =
+      tools.length === 0
+        ? "none"
+        : structured
+          ? "required"
+          : toolChoice === "required"
+            ? step === 0
+              ? "required"
+              : "auto"
+            : toolChoice;
+
+    const res = await chatWithRetry(provider, messages, {
       model: model!.model,
       temperature: model!.temperature,
       maxTokens: model!.maxTokens,
       tools: tools.length > 0 ? tools : undefined,
-      toolChoice: tools.length > 0 ? toolChoice : undefined,
+      toolChoice: tools.length > 0 ? choice : undefined,
       onDelta: (text) => ctx.onDelta(text),
     });
-    text = res.text;
-    if (!res.toolCalls || res.toolCalls.length === 0) {
+
+    if (res.usage) {
+      totalTokens += res.usage.inputTokens + res.usage.outputTokens;
+      ctx.onUsage?.(res.usage);
+      if (budget?.maxTokens != null && totalTokens > budget.maxTokens) {
+        throw new Error(
+          `agent node: token budget exceeded (${totalTokens} > ${budget.maxTokens})`,
+        );
+      }
+    }
+
+    finalText = res.text;
+    const calls = res.toolCalls ?? [];
+
+    // Structured finish: the model committed the answer via `respond`.
+    const respondCall = structured ? calls.find((c) => c.name === RESPOND_TOOL) : undefined;
+    if (respondCall && structured) {
+      result = structured.unwrap(respondCall.arguments);
+      gotResult = true;
+      pendingTools = false;
+      break;
+    }
+
+    if (calls.length === 0) {
       pendingTools = false;
       break;
     }
     pendingTools = true;
 
-    messages.push({ role: "assistant", content: res.text, toolCalls: res.toolCalls });
+    messages.push({ role: "assistant", content: res.text, toolCalls: calls });
     // A bad tool name or a throwing tool is the model's problem, not the run's:
     // feed the error back as a `tool` message so the loop can recover, rather
     // than aborting the whole flow.
     const results = await Promise.all(
-      res.toolCalls.map(async (call) => {
-        const impl = getTool(call.name);
+      calls.map(async (call) => {
+        const impl = resolveToolImpl(ctx, call.name);
         if (!impl) {
           return { call, content: `Error: unknown tool "${call.name}"` };
         }
@@ -127,13 +296,13 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
             return { call, content: `Error: tool "${impl.name}" was not approved${why}` };
           }
         }
-        const result = await runTool(impl, call.arguments);
-        const content = result.ok
-          ? typeof result.output === "string"
-            ? result.output
-            : JSON.stringify(result.output)
-          : `Error: ${result.error}`;
-        return { call, content };
+        const ran = await runTool(impl, call.arguments);
+        const content = ran.ok
+          ? typeof ran.output === "string"
+            ? ran.output
+            : JSON.stringify(ran.output)
+          : `Error: ${ran.error}`;
+        return { call, content: truncate(content, MAX_TOOL_RESULT_CHARS) };
       }),
     );
     for (const { call, content } of results) {
@@ -142,10 +311,13 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
   }
   if (pendingTools) {
     throw new Error(
-      `agent node: tool-use loop hit maxSteps (${maxSteps}) with the model still requesting tools`,
+      `agent node: tool-use loop hit maxSteps (${stepCap}) with the model still requesting tools`,
     );
   }
-  return patch(ctx.config.writeTo, parseOutput(ctx.config.output, text));
+  if (schema) {
+    return patch(ctx.config.writeTo, gotResult ? result : parseOutput(ctx.config.output, finalText));
+  }
+  return patch(ctx.config.writeTo, finalText);
 }
 
 /** One branch of a router node: a handle name plus optional guidance. */
@@ -227,7 +399,7 @@ function describeClasses(classes: RouterClass[], fallback: boolean): string {
  */
 async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
   const model = ctx.config.model as ModelRef | undefined;
-  const provider = requireProvider(model, "router");
+  const provider = requireProvider(ctx, model, "router");
   const classes = (ctx.config.classes as RouterClass[]) ?? [];
   const fallback = ctx.config.fallback === true;
   const names = classes.map((c) => c.name);
@@ -270,7 +442,7 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
 /** `tool`: invoke a registered tool with evaluated args. */
 async function tool(ctx: ExecutorContext): Promise<ExecutorResult> {
   const name = ctx.config.tool as string;
-  const impl = getTool(name);
+  const impl = resolveToolImpl(ctx, name);
   if (!impl) throw new Error(`tool node: no tool registered as "${name}"`);
   const args = ctx.evaluate(ctx.config.args ?? {});
   // Gated tools (write/bulk/dangerous or requiresApproval) need explicit human

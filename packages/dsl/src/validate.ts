@@ -116,6 +116,19 @@ export function validateFlow(flow: Flow, opts: ValidateOptions = {}): Validation
         });
       }
     }
+
+    if (node.type === "agent") {
+      const cfg = node.config as Record<string, unknown>;
+      const hasPrompt = typeof cfg.prompt === "string" && cfg.prompt.trim() !== "";
+      const hasSystem = typeof cfg.system === "string" && cfg.system.trim() !== "";
+      if (!hasPrompt && !hasSystem) {
+        issues.push({
+          level: "warning",
+          nodeId: node.id,
+          message: `agent has neither a prompt nor a system message — it will call the model with empty input`,
+        });
+      }
+    }
   }
 
   // Edges: endpoints exist; source handle is valid for the source node.

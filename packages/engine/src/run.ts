@@ -87,6 +87,9 @@ export async function runFlow(
   let steps = 0;
 
   while (queue.length > 0) {
+    if (options.signal?.aborted) {
+      return fail(parsed.id, state, "run aborted", emit);
+    }
     if (++steps > maxSteps) {
       return fail(parsed.id, state, `step limit (${maxSteps}) exceeded`, emit);
     }
@@ -96,11 +99,16 @@ export async function runFlow(
 
     emit({ type: "node-start", nodeId });
     const onToolApproval = options.onToolApproval;
+    const providers = options.providers;
+    const tools = options.tools;
     const ctx: ExecutorContext = {
       config: node.config,
       state,
       evaluate: (e) => evaluate(e, state),
       onDelta: (text) => emit({ type: "token", nodeId, data: text }),
+      onUsage: (usage) => emit({ type: "usage", nodeId, data: usage }),
+      getProvider: providers ? (id) => providers[id] : undefined,
+      getTool: tools ? (name) => tools[name] : undefined,
       requestApproval: onToolApproval
         ? (req) => Promise.resolve(onToolApproval({ nodeId, ...req }))
         : undefined,
