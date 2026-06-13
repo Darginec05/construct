@@ -6,7 +6,7 @@ import { SCHEMA_VERSION, type Flow } from "@construct/dsl";
 import { runFlow, type ToolApprovalRequest } from "@construct/engine";
 import { McpClient, registerMcpTools } from "@construct/mcp";
 import { getTool } from "@construct/tools";
-import "../dist/index.js"; // registers agent / classifier / tool / retrieve executors
+import "../dist/index.js"; // registers agent / router / tool / retrieve executors
 
 /**
  * End-to-end: stand up a real (in-memory) MCP server, mount its tools into the

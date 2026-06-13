@@ -10,7 +10,8 @@ export type { RunOpts, NodeSpec } from "./flow.js";
 export { FlowBuilder, NodeHandle, PendingEdge } from "./builder.js";
 export type {
   AgentOpts,
-  ClassifierOpts,
+  RouterOpts,
+  RouterClassInput,
   BranchOpts,
   SwitchOpts,
   LoopOpts,

@@ -14,7 +14,7 @@ describe("catalog registry", () => {
       "input",
       "output",
       "agent",
-      "classifier",
+      "router",
       "branch",
       "switch",
       "loop",
@@ -105,12 +105,22 @@ describe("config schemas", () => {
     expect(schema.safeParse({ inline: "return 1" }).success).toBe(true);
   });
 
-  it("requires at least one classifier class", () => {
-    const schema = getNodeSpec("classifier")!.configSchema;
+  it("requires at least one router class", () => {
+    const schema = getNodeSpec("router")!.configSchema;
     expect(
       schema.safeParse({
         model: { provider: "a", model: "x" },
         classes: [],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires each router class to have a name", () => {
+    const schema = getNodeSpec("router")!.configSchema;
+    expect(
+      schema.safeParse({
+        model: { provider: "a", model: "x" },
+        classes: [{ description: "no name" }],
       }).success,
     ).toBe(false);
   });
@@ -123,10 +133,21 @@ describe("resolveNodeOutputs", () => {
     expect(resolveNodeOutputs("output", {})).toEqual([]);
   });
 
-  it("expands classifier classes into handles", () => {
+  it("expands router class names into handles", () => {
     expect(
-      resolveNodeOutputs("classifier", { classes: ["billing", "support"] }),
+      resolveNodeOutputs("router", {
+        classes: [{ name: "billing" }, { name: "support" }],
+      }),
     ).toEqual(["billing", "support"]);
+  });
+
+  it("appends a fallback handle when router fallback is on", () => {
+    expect(
+      resolveNodeOutputs("router", {
+        classes: [{ name: "billing" }, { name: "support" }],
+        fallback: true,
+      }),
+    ).toEqual(["billing", "support", "fallback"]);
   });
 
   it("appends default to switch cases", () => {

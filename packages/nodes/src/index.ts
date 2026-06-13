@@ -148,13 +148,22 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
   return patch(ctx.config.writeTo, parseOutput(ctx.config.output, text));
 }
 
+/** One branch of a router node: a handle name plus optional guidance. */
+interface RouterClass {
+  name: string;
+  description?: string;
+}
+
+/** Reserved handle for the router's "no class fit" branch. */
+const ROUTER_FALLBACK = "fallback";
+
 /**
  * Pick the class the model named. Prefer a whole-word hit so "bill" doesn't
- * swallow "billing"; fall back to substring, then to the longest class first so
+ * swallow "billing"; fall back to substring, then to the longest name first so
  * a more specific label wins over a prefix of it.
  */
-function matchClass(text: string, classes: string[]): string | undefined {
-  const ranked = [...classes].sort((a, b) => b.length - a.length);
+function matchClass(text: string, names: string[]): string | undefined {
+  const ranked = [...names].sort((a, b) => b.length - a.length);
   for (const c of ranked) {
     const word = new RegExp(`\\b${c.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
     if (word.test(text)) return c;
@@ -162,20 +171,38 @@ function matchClass(text: string, classes: string[]): string | undefined {
   return ranked.find((c) => text.includes(c.toLowerCase()));
 }
 
-/** `classifier`: forced choice among `classes`; the chosen class is the handle. */
-async function classifier(ctx: ExecutorContext): Promise<ExecutorResult> {
+/** Render the choices for the system prompt: "name — description" per line. */
+function describeClasses(classes: RouterClass[], fallback: boolean): string {
+  const lines = classes.map((c) =>
+    c.description ? `- ${c.name}: ${c.description}` : `- ${c.name}`,
+  );
+  if (fallback) {
+    lines.push(`- ${ROUTER_FALLBACK}: none of the above, or you are not confident.`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * `router`: forced choice among `classes`; the chosen class name is the handle.
+ * The model reads each class description to decide. When `fallback` is on, a
+ * no-match routes to the "fallback" handle instead of the first class.
+ */
+async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
   const model = ctx.config.model as ModelRef | undefined;
-  const provider = requireProvider(model, "classifier");
-  const classes = (ctx.config.classes as string[]) ?? [];
+  const provider = requireProvider(model, "router");
+  const classes = (ctx.config.classes as RouterClass[]) ?? [];
+  const fallback = ctx.config.fallback === true;
+  const names = classes.map((c) => c.name);
   const prompt = ctx.evaluate(ctx.config.prompt);
 
+  const choices = fallback ? [...names, ROUTER_FALLBACK] : names;
   const res = await provider.chat(
     [
       {
         role: "system",
-        content: `Classify the input. Respond with exactly one of: ${classes.join(
-          ", ",
-        )}.`,
+        content:
+          `Route the input to exactly one of the following branches. ` +
+          `Respond with only the branch name.\n\n${describeClasses(classes, fallback)}`,
       },
       { role: "user", content: prompt == null ? "" : String(prompt) },
     ],
@@ -183,7 +210,8 @@ async function classifier(ctx: ExecutorContext): Promise<ExecutorResult> {
   );
   const text = res.text.trim().toLowerCase();
 
-  const chosen = matchClass(text, classes) ?? classes[0] ?? "out";
+  const matched = matchClass(text, choices);
+  const chosen = matched ?? (fallback ? ROUTER_FALLBACK : names[0] ?? "out");
   return { ...patch(ctx.config.writeTo, chosen), handle: chosen };
 }
 
@@ -223,7 +251,7 @@ async function retrieve(ctx: ExecutorContext): Promise<ExecutorResult> {
 
 export function registerBuiltinNodes(): void {
   registerExecutor("agent", agent);
-  registerExecutor("classifier", classifier);
+  registerExecutor("router", router);
   registerExecutor("tool", tool);
   registerExecutor("retrieve", retrieve);
 }

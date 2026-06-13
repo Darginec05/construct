@@ -28,7 +28,7 @@ const assistant = defineFlow("assistant", "Assistant", (f) => {
     .to(f.output(reply));
 });
 
-// --- 2. Support router: classifier fork with a gated write arm -------------
+// --- 2. Support router: router fork with a gated write arm -----------------
 
 const crmUpdate = defineTool({
   name: "crm_update",
@@ -45,10 +45,13 @@ const supportRouter = defineFlow("support-router", "Support router", (f) => {
 
   const router = f
     .input({ channel: message })
-    .classifier({
+    .router({
       model: anthropic("claude-haiku-4-5"),
       prompt: message,
-      classes: ["read", "write"],
+      classes: [
+        { name: "read", description: "Look up or read an existing customer record." },
+        { name: "write", description: "Create or update a customer record." },
+      ],
       writeTo: intent,
     });
 

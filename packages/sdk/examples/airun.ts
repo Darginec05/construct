@@ -3,8 +3,8 @@ import { anthropic, defineFlow, defineNode, defineTool } from "@construct/sdk";
 
 /**
  * The airun CRM agent, authored with the fluent SDK:
- *   prefilter -> classify -> (read: tool-loop | write: gated tool -> approval).
- * The classifier's `classes` become its output handles, so `router.on("read")`
+ *   prefilter -> route -> (read: tool-loop | write: gated tool -> approval).
+ * The router's class names become its output handles, so `router.on("read")`
  * and `router.on("write")` fork the graph; both arms rejoin on one output node.
  */
 
@@ -45,10 +45,17 @@ export const airun = defineFlow("airun", "airun CRM agent", (flow) => {
   const router = flow
     .input({ channel: message })
     .code(heuristicPrefilter, { writeTo: route })
-    .classifier({
+    .router({
       model: anthropic("claude-haiku-4-5"),
       prompt: message,
-      classes: ["smalltalk", "read", "write", "bulk", "content", "refuse"],
+      classes: [
+        { name: "smalltalk", description: "Greetings, chit-chat, anything not a real request." },
+        { name: "read", description: "Look up or read existing CRM records." },
+        { name: "write", description: "Create or update a single CRM record." },
+        { name: "bulk", description: "Changes that touch many records at once." },
+        { name: "content", description: "Draft or edit copy, messages, or documents." },
+        { name: "refuse", description: "Out-of-scope or disallowed requests." },
+      ],
       writeTo: intent,
     });
 

@@ -53,7 +53,7 @@ const PRESENTATION: Record<string, NodePresentation> = {
   input: { label: "Input", icon: LogIn },
   output: { label: "Output", icon: Flag },
   agent: { label: "Agent", icon: Bot },
-  classifier: { label: "Classifier", icon: Split },
+  router: { label: "Router", icon: Split },
   branch: { label: "Branch", icon: GitBranch },
   switch: { label: "Switch", icon: Route },
   loop: { label: "Loop", icon: Repeat },

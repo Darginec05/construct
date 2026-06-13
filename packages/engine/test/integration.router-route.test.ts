@@ -11,22 +11,28 @@ import type { ExecutorContext, RunEvent } from "../src/types.js";
 
 /**
  * Integration: a real DSL flow driven through the real engine runner, whose
- * `classifier` leaf calls a model through the real provider registry. Only the
+ * `router` leaf calls a model through the real provider registry. Only the
  * model itself is faked — everything between the flow definition and the routing
  * decision is the production path: parse → validate → worklist → executor →
  * provider.chat → handle resolution → output.
  */
 
-// A `classifier` executor: ask the model to pick a class, then route on it.
+interface RouterClass {
+  name: string;
+  description?: string;
+}
+
+// A `router` executor: ask the model to pick a class name, then route on it.
 // This mirrors what @construct/nodes would register in production.
-registerExecutor("classifier", async (ctx: ExecutorContext) => {
+registerExecutor("router", async (ctx: ExecutorContext) => {
   const model = ctx.config.model as { provider: string; model: string };
-  const classes = ctx.config.classes as string[];
+  const classes = ctx.config.classes as RouterClass[];
+  const names = classes.map((c) => c.name);
   const provider = getProvider(model.provider);
   if (!provider) throw new Error(`no provider "${model.provider}"`);
 
   const messages: ChatMessage[] = [
-    { role: "system", content: `Reply with exactly one of: ${classes.join(", ")}` },
+    { role: "system", content: `Reply with exactly one of: ${names.join(", ")}` },
     { role: "user", content: String(ctx.evaluate(ctx.config.prompt)) },
   ];
   const result = await provider.chat(messages, {
@@ -36,8 +42,8 @@ registerExecutor("classifier", async (ctx: ExecutorContext) => {
   });
 
   const label = result.text.trim();
-  if (!classes.includes(label)) {
-    throw new Error(`classifier returned unknown class "${label}"`);
+  if (!names.includes(label)) {
+    throw new Error(`router returned unknown class "${label}"`);
   }
   const writeTo = ctx.config.writeTo;
   return {
@@ -59,11 +65,11 @@ const flow: Flow = {
     { id: "in", type: "input", config: { schema: { text: "text" } } },
     {
       id: "classify",
-      type: "classifier",
+      type: "router",
       config: {
         model: { provider: "fake", model: "test-model" },
         prompt: "$.text",
-        classes: ["positive", "negative"],
+        classes: [{ name: "positive" }, { name: "negative" }],
         writeTo: "sentiment",
       },
     },
@@ -98,14 +104,14 @@ describe("flow → engine → provider integration", () => {
     registerProvider(sentimentProvider());
   });
 
-  it("routes to the positive branch when the model classifies positive", async () => {
+  it("routes to the positive branch when the model picks positive", async () => {
     const res = await runFlow(flow, { input: { text: "I love this product" } });
     expect(res.status).toBe("completed");
     expect(res.state.sentiment).toBe("positive");
     expect(res.output).toBe("thanks for the kind words");
   });
 
-  it("routes to the negative branch when the model classifies negative", async () => {
+  it("routes to the negative branch when the model picks negative", async () => {
     const res = await runFlow(flow, { input: { text: "this is broken" } });
     expect(res.status).toBe("completed");
     expect(res.state.sentiment).toBe("negative");
@@ -121,7 +127,7 @@ describe("flow → engine → provider integration", () => {
     expect(userMsg.content).toBe("great job");
   });
 
-  it("streams the model's text as token events for the classifier node", async () => {
+  it("streams the model's text as token events for the router node", async () => {
     const events: RunEvent[] = [];
     await runFlow(flow, {
       input: { text: "good stuff" },

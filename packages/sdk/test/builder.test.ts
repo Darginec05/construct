@@ -179,7 +179,7 @@ describe("reference flows render to valid documents", () => {
     ).toBe(true);
   });
 
-  it("airun: classifier fork with two branches rejoining on a shared output", () => {
+  it("airun: router fork with two branches rejoining on a shared output", () => {
     const crmUpdate = defineTool({
       name: "crm_update",
       description: "update",
@@ -194,10 +194,10 @@ describe("reference flows render to valid documents", () => {
 
       const router = f
         .input({ channel: message })
-        .classifier({
+        .router({
           model: anthropic("claude-haiku-4-5"),
           prompt: message,
-          classes: ["read", "write"],
+          classes: [{ name: "read" }, { name: "write" }],
           writeTo: intent,
         });
 
@@ -212,9 +212,9 @@ describe("reference flows render to valid documents", () => {
     }).toJSON();
 
     expect(errorsOf(airun)).toEqual([]);
-    // classifier classes become its output handles
-    const classifierEdges = airun.edges.filter((e) => e.source === "classifier");
-    expect(classifierEdges.map((e) => e.sourceHandle).sort()).toEqual(["read", "write"]);
+    // router class names become its output handles
+    const routerEdges = airun.edges.filter((e) => e.source === "router");
+    expect(routerEdges.map((e) => e.sourceHandle).sort()).toEqual(["read", "write"]);
     // both arms target the single output node
     const toOut = airun.edges.filter((e) => e.target === "output");
     expect(toOut).toHaveLength(2);

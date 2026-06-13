@@ -115,7 +115,7 @@ export interface ExecutorContext {
 export interface ExecutorResult {
   /** State patch, applied through each channel's reducer. */
   patch?: Record<string, unknown>;
-  /** Chosen output handle (classifier/human). Defaults to "out". */
+  /** Chosen output handle (router/human). Defaults to "out". */
   handle?: string;
 }
 

@@ -13,7 +13,7 @@ const HINTS: Record<string, string> = {
   "agent.toolChoice": "auto calls tools as needed; required forces one; none disables.",
   "agent.maxSteps": "Caps the tool-use loop before force-close.",
   "agent.output": "text returns prose; structured forces a JSON schema.",
-  "classifier.classes": "Each class becomes an output handle.",
+  "router.classes": "Each class name becomes an output handle; the description tells the model when to pick it.",
   "switch.cases": "Each case becomes an output handle (plus default).",
   "switch.on": EXPR_PLACEHOLDER,
   "join.count": "Only used when mode is quorum.",

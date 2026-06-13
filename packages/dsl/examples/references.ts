@@ -31,11 +31,18 @@ export const airun: Flow = {
     },
     {
       id: "router",
-      type: "classifier",
+      type: "router",
       config: {
         model: { provider: "anthropic", model: "claude-haiku-4-5" },
         prompt: "{{message}}",
-        classes: ["smalltalk", "read", "write", "bulk", "content", "refuse"],
+        classes: [
+          { name: "smalltalk", description: "Greetings, chit-chat, anything not a real request." },
+          { name: "read", description: "Look up or read existing CRM records." },
+          { name: "write", description: "Create or update a single CRM record." },
+          { name: "bulk", description: "Changes that touch many records at once." },
+          { name: "content", description: "Draft or edit copy, messages, or documents." },
+          { name: "refuse", description: "Out-of-scope or disallowed requests." },
+        ],
         writeTo: "intent",
       },
     },

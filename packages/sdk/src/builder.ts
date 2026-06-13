@@ -64,10 +64,17 @@ export interface AgentOpts extends NodeId {
   writeTo?: ChannelHandle | string;
 }
 
-export interface ClassifierOpts extends NodeId {
+export interface RouterClassInput {
+  name: string;
+  description?: string;
+}
+
+export interface RouterOpts extends NodeId {
   model: ModelRef;
   prompt?: ExprInput;
-  classes: string[];
+  classes: RouterClassInput[];
+  /** Add a built-in "fallback" handle for low-confidence / no-match inputs. */
+  fallback?: boolean;
   writeTo?: ChannelHandle | string;
 }
 
@@ -214,11 +221,12 @@ abstract class Connector {
     }));
   }
 
-  classifier(opts: ClassifierOpts): NodeHandle {
-    return this.b.spawn(this.origin(), "classifier", opts.id, clean({
+  router(opts: RouterOpts): NodeHandle {
+    return this.b.spawn(this.origin(), "router", opts.id, clean({
       model: opts.model,
       prompt: opts.prompt === undefined ? undefined : toExpr(opts.prompt),
       classes: opts.classes,
+      fallback: opts.fallback,
       writeTo: toChannel(opts.writeTo),
     }));
   }
@@ -326,7 +334,7 @@ export class NodeHandle extends Connector {
     return { id: this.id };
   }
 
-  /** Leave this node through a named output handle (branch/classifier/human). */
+  /** Leave this node through a named output handle (branch/router/human). */
   on(handle: string): PendingEdge {
     return new PendingEdge(this.b, this.id, handle);
   }
@@ -461,7 +469,7 @@ export class FlowBuilder {
   /**
    * AND/quorum barrier: wait for several upstream origins before continuing.
    * Each source may be a node (its default handle) or a named handle via
-   * `node.on("handle")`, so a barrier can gather specific branch/classifier arms.
+   * `node.on("handle")`, so a barrier can gather specific branch/router arms.
    */
   join(sources: Array<NodeHandle | PendingEdge>, opts: JoinOpts = {}): NodeHandle {
     const node = this.add(

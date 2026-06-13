@@ -68,13 +68,29 @@ const AgentConfig = z.object({
 });
 
 /**
- * A cheap, forced-structured-output decision node (the router pattern). Its
- * `classes` become the output handles, so downstream edges branch on intent.
+ * A named branch the router can choose. The `description` is what the model
+ * actually reads to decide — write it like an instruction to a dispatcher
+ * ("billing questions, refunds, charges I don't recognize"), not a bare label.
  */
-const ClassifierConfig = z.object({
+const RouterClassSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+});
+export type RouterClass = z.infer<typeof RouterClassSchema>;
+
+/**
+ * A cheap, forced-choice decision node (the router pattern). The model reads
+ * the input and picks exactly one class; each class `name` becomes an output
+ * handle, so downstream edges branch on intent. When `fallback` is on, an extra
+ * "fallback" handle catches inputs that match no class — wire it to a default
+ * specialist or a clarifying question instead of silently picking the first.
+ */
+const RouterConfig = z.object({
   model: ModelRefSchema,
   prompt: ExprSchema.optional(),
-  classes: z.array(z.string()).min(1),
+  classes: z.array(RouterClassSchema).min(1),
+  /** Add a built-in "fallback" handle for low-confidence / no-match inputs. */
+  fallback: z.boolean().optional(),
   writeTo: z.string().optional(),
 });
 
@@ -249,10 +265,10 @@ const BUILTIN_SPECS: readonly NodeSpec[] = [
     outputs: ["out"],
   },
   {
-    type: "classifier",
+    type: "router",
     category: "model",
-    description: "Forced structured-output decision; branches on its classes.",
-    configSchema: ClassifierConfig,
+    description: "Reads the input and routes it to one of several named branches.",
+    configSchema: RouterConfig,
     outputs: "dynamic",
   },
   {
@@ -355,7 +371,7 @@ export const BUILTIN_NODE_TYPES = BUILTIN_SPECS.map((s) => s.type);
 
 /**
  * Resolve the concrete output handles of a node instance, expanding "dynamic"
- * specs (classifier classes, switch cases, human modes) from its config.
+ * specs (router classes, switch cases, human modes) from its config.
  */
 export function resolveNodeOutputs(type: string, config: unknown): string[] {
   const spec = getNodeSpec(type);
@@ -363,8 +379,10 @@ export function resolveNodeOutputs(type: string, config: unknown): string[] {
   if (spec.outputs !== "dynamic") return [...spec.outputs];
 
   const cfg = (config ?? {}) as Record<string, unknown>;
-  if (type === "classifier" && Array.isArray(cfg.classes)) {
-    return cfg.classes as string[];
+  if (type === "router" && Array.isArray(cfg.classes)) {
+    const handles = (cfg.classes as RouterClass[]).map((c) => c.name);
+    if (cfg.fallback) handles.push("fallback");
+    return handles;
   }
   if (type === "switch" && Array.isArray(cfg.cases)) {
     return [...(cfg.cases as string[]), "default"];

@@ -1,6 +1,6 @@
 import { runFlow, type RunEvent, type RunOptions, type RunResult } from "@construct/engine";
 import { createFakeProvider, registerProvider } from "@construct/providers";
-// Side-effect import: registers the agent / classifier / tool / retrieve executors.
+// Side-effect import: registers the agent / router / tool / retrieve executors.
 import "@construct/nodes";
 import type { FlowDoc } from "../flow/types.ts";
 import { toDslFlow } from "../flow/serialize.ts";

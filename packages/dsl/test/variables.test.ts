@@ -49,11 +49,11 @@ describe("flowVariables — writeTo producers", () => {
         { id: "in", type: "input", config: { schema: { message: "text" } } },
         {
           id: "router",
-          type: "classifier",
+          type: "router",
           config: {
             model: { provider: "anthropic", model: "claude-haiku-4-5" },
             prompt: "{{message}}",
-            classes: ["a", "b"],
+            classes: [{ name: "a" }, { name: "b" }],
             writeTo: "intent",
           },
         },

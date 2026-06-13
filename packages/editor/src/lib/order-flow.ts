@@ -27,8 +27,8 @@ export function summarize(type: string, config: Cfg): string {
       bits.push(`up to ${(c.maxSteps as number) ?? 8} steps`);
       return bits.join(" · ");
     }
-    case "classifier":
-      return `Routes on ${(c.classes as unknown[] | undefined)?.length ?? 0} classes`;
+    case "router":
+      return `Routes to ${(c.classes as unknown[] | undefined)?.length ?? 0} branches`;
     case "branch":
       return "If " + fmt(c.condition);
     case "switch":

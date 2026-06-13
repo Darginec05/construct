@@ -8,7 +8,7 @@ import {
 } from "@construct/providers";
 import { registerTool } from "@construct/tools";
 import { createMemoryStore, registerStore } from "@construct/rag";
-import "../dist/index.js"; // registers agent / classifier / tool / retrieve executors
+import "../dist/index.js"; // registers agent / router / tool / retrieve executors
 
 function userText(messages: ChatMessage[]): string {
   const m = messages.find((x) => x.role === "user");
@@ -107,11 +107,14 @@ const flow: Flow = {
     { id: "in", type: "input", config: { schema: { q: "text" } } },
     {
       id: "route",
-      type: "classifier",
+      type: "router",
       config: {
         model: { provider: "fake", model: "m" },
         prompt: "{{q}}",
-        classes: ["billing", "support"],
+        classes: [
+          { name: "billing", description: "Invoices, charges, refunds." },
+          { name: "support", description: "Product help and troubleshooting." },
+        ],
         writeTo: "intent",
       },
     },
@@ -178,7 +181,7 @@ const toolFlow: Flow = {
 async function main(): Promise<void> {
   const res = await runFlow(flow, { input: { q: "charge me twice?" } });
   assert.equal(res.status, "completed");
-  assert.equal(res.state.intent, "billing", "classifier sets intent + handle");
+  assert.equal(res.state.intent, "billing", "router sets intent + handle");
   assert.equal(res.output, "ok:billing: charge me twice?", "billing branch ran");
 
   const loop = await runFlow(toolFlow, { input: {} });
