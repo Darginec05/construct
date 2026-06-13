@@ -6,3 +6,5 @@ export * from "./primitives.js";
 export * from "./nodes.js";
 export * from "./flow.js";
 export * from "./validate.js";
+export * from "./variables.js";
+export * from "./expr-tokens.js";
