@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { FetchLike, Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { registerTool, type Tool, type ToolTier } from "@construct/tools";
 
@@ -66,6 +67,12 @@ export interface McpConnectConfig {
   transport: McpTransportKind;
   /** Static headers sent on every request (e.g. an Authorization bearer token). */
   headers?: Record<string, string>;
+  /**
+   * OAuth client provider for servers requiring user-delegated auth. When set, the
+   * SDK transport drives the OAuth flow through it (discovery, attaching the access
+   * token, refresh on 401). Leave unset for static-token / no-auth servers.
+   */
+  authProvider?: OAuthClientProvider;
   /** Identifies this client to the server. */
   client?: McpClientOptions;
 }
@@ -78,10 +85,11 @@ function headerInjectingFetch(headers: Record<string, string>): FetchLike {
 function createTransport(config: McpConnectConfig): Transport {
   const url = new URL(config.url);
   const fetchImpl = config.headers ? headerInjectingFetch(config.headers) : undefined;
+  const authProvider = config.authProvider;
   if (config.transport === "sse") {
-    return new SSEClientTransport(url, { fetch: fetchImpl });
+    return new SSEClientTransport(url, { fetch: fetchImpl, authProvider });
   }
-  return new StreamableHTTPClientTransport(url, { fetch: fetchImpl });
+  return new StreamableHTTPClientTransport(url, { fetch: fetchImpl, authProvider });
 }
 
 /**
