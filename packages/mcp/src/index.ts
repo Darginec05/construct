@@ -1,7 +1,16 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import {
+  UnauthorizedError,
+  type OAuthClientProvider,
+  type OAuthDiscoveryState,
+} from "@modelcontextprotocol/sdk/client/auth.js";
+import type {
+  OAuthClientInformationMixed,
+  OAuthClientMetadata,
+  OAuthTokens,
+} from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { FetchLike, Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { registerTool, type Tool, type ToolTier } from "@construct/tools";
 
@@ -82,7 +91,14 @@ function headerInjectingFetch(headers: Record<string, string>): FetchLike {
   return (url, init) => fetch(url, { ...init, headers: { ...init?.headers, ...headers } });
 }
 
-function createTransport(config: McpConnectConfig): Transport {
+/**
+ * Build the concrete SDK transport for a config. Returns the concrete class (not
+ * the `Transport` interface) so callers can reach `finishAuth`, which only the
+ * concrete HTTP/SSE transports expose.
+ */
+function createConcreteTransport(
+  config: McpConnectConfig,
+): SSEClientTransport | StreamableHTTPClientTransport {
   const url = new URL(config.url);
   const fetchImpl = config.headers ? headerInjectingFetch(config.headers) : undefined;
   const authProvider = config.authProvider;
@@ -90,6 +106,10 @@ function createTransport(config: McpConnectConfig): Transport {
     return new SSEClientTransport(url, { fetch: fetchImpl, authProvider });
   }
   return new StreamableHTTPClientTransport(url, { fetch: fetchImpl, authProvider });
+}
+
+function createTransport(config: McpConnectConfig): Transport {
+  return createConcreteTransport(config);
 }
 
 /**
@@ -201,4 +221,175 @@ function flattenResult(res: CallToolResultLike): unknown {
   if (res.isError) throw new Error(text || "MCP tool returned an error");
   if (res.structuredContent !== undefined) return res.structuredContent;
   return text !== "" ? text : (res.content ?? []);
+}
+
+/**
+ * The serializable state of one MCP OAuth authorization-code flow, owned by the
+ * host. It is everything the SDK's `auth()` machinery would otherwise keep in
+ * memory across the user-redirect boundary: the PKCE verifier, the dynamically
+ * registered client, the cached discovery, and (after finish) the tokens. The
+ * host persists this blob (encrypted) between {@link beginMcpOauth} and
+ * {@link finishMcpOauth} and again for run-time refresh. Plain JSON by design.
+ */
+export interface McpOauthSession {
+  /** Absolute callback URL registered as the OAuth `redirect_uri`. */
+  redirectUri: string;
+  /** Opaque CSRF nonce echoed as the OAuth `state` parameter. */
+  state: string;
+  /** PKCE code verifier generated at begin, needed to redeem the code. */
+  codeVerifier?: string;
+  /** Client credentials from dynamic registration (RFC 7591). */
+  clientInformation?: OAuthClientInformationMixed;
+  /** Cached RFC 9728 / RFC 8414 discovery, so finish skips re-discovery. */
+  discoveryState?: OAuthDiscoveryState;
+  /** Tokens from a successful exchange/refresh. */
+  tokens?: OAuthTokens;
+}
+
+const OAUTH_CLIENT_NAME = "Construct Cloud";
+
+/**
+ * An {@link OAuthClientProvider} backed by a plain {@link McpOauthSession}, so the
+ * SDK's stateful `auth()` flow can be paused at the user redirect and resumed in a
+ * separate request. Construct registers as a public client (PKCE, no client
+ * secret); `redirectToAuthorization` captures the URL instead of navigating.
+ */
+class StoredOAuthProvider implements OAuthClientProvider {
+  /** Set when the SDK asks to redirect the user agent for consent. */
+  authorizationUrl: string | undefined;
+  private readonly session: McpOauthSession;
+
+  constructor(session: McpOauthSession) {
+    this.session = { ...session };
+  }
+
+  /** Current session blob, including anything the SDK saved during the flow. */
+  snapshot(): McpOauthSession {
+    return { ...this.session };
+  }
+
+  get redirectUrl(): string {
+    return this.session.redirectUri;
+  }
+
+  get clientMetadata(): OAuthClientMetadata {
+    return {
+      client_name: OAUTH_CLIENT_NAME,
+      redirect_uris: [this.session.redirectUri],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    };
+  }
+
+  state(): string {
+    return this.session.state;
+  }
+
+  clientInformation(): OAuthClientInformationMixed | undefined {
+    return this.session.clientInformation;
+  }
+
+  saveClientInformation(info: OAuthClientInformationMixed): void {
+    this.session.clientInformation = info;
+  }
+
+  tokens(): OAuthTokens | undefined {
+    return this.session.tokens;
+  }
+
+  saveTokens(tokens: OAuthTokens): void {
+    this.session.tokens = tokens;
+  }
+
+  redirectToAuthorization(authorizationUrl: URL): void {
+    this.authorizationUrl = authorizationUrl.toString();
+  }
+
+  saveCodeVerifier(codeVerifier: string): void {
+    this.session.codeVerifier = codeVerifier;
+  }
+
+  codeVerifier(): string {
+    if (this.session.codeVerifier === undefined) {
+      throw new Error("OAuth session is missing its PKCE code verifier");
+    }
+    return this.session.codeVerifier;
+  }
+
+  saveDiscoveryState(discoveryState: OAuthDiscoveryState): void {
+    this.session.discoveryState = discoveryState;
+  }
+
+  discoveryState(): OAuthDiscoveryState | undefined {
+    return this.session.discoveryState;
+  }
+}
+
+export interface BeginMcpOauthResult {
+  /** URL to send the user agent to for consent. */
+  authorizationUrl: string;
+  /** Session to persist; replay it into {@link finishMcpOauth}. */
+  session: McpOauthSession;
+}
+
+/**
+ * Start an MCP OAuth authorization-code flow. Connecting to a server that requires
+ * user-delegated auth triggers the SDK's `auth()` (discovery → dynamic client
+ * registration → PKCE), which asks to redirect the user and then throws
+ * {@link UnauthorizedError}. We intercept the redirect to return its URL plus the
+ * captured session; the host stores the session and sends the user to consent.
+ */
+export async function beginMcpOauth(
+  config: McpConnectConfig,
+  params: { redirectUri: string; state: string },
+): Promise<BeginMcpOauthResult> {
+  const provider = new StoredOAuthProvider({
+    redirectUri: params.redirectUri,
+    state: params.state,
+  });
+  const client = new McpClient(config.client);
+  try {
+    await client.connect(createTransport({ ...config, authProvider: provider }));
+    // The server accepted the connection without OAuth — nothing to authorize.
+    await client.close().catch(() => undefined);
+    throw new Error("MCP server did not require OAuth authorization");
+  } catch (err) {
+    if (!(err instanceof UnauthorizedError)) throw err;
+    if (provider.authorizationUrl === undefined) {
+      throw new Error("OAuth flow did not produce an authorization URL");
+    }
+    return {
+      authorizationUrl: provider.authorizationUrl,
+      session: provider.snapshot(),
+    };
+  }
+}
+
+export interface FinishMcpOauthResult {
+  /** Updated session (now carrying tokens); persist it for run-time refresh. */
+  session: McpOauthSession;
+  /** A live, authorized client — list tools, then `close()` it. */
+  client: McpClient;
+}
+
+/**
+ * Complete an MCP OAuth flow: replay the {@link McpOauthSession} from
+ * {@link beginMcpOauth}, exchange the returned authorization code for tokens, and
+ * return a connected client plus the token-bearing session. The provider reuses
+ * the saved PKCE verifier, registered client, and discovery, so no step repeats.
+ */
+export async function finishMcpOauth(
+  config: McpConnectConfig,
+  params: { session: McpOauthSession; code: string },
+): Promise<FinishMcpOauthResult> {
+  const provider = new StoredOAuthProvider(params.session);
+  const transport = createConcreteTransport({
+    ...config,
+    authProvider: provider,
+  });
+  await transport.finishAuth(params.code);
+  const client = new McpClient(config.client);
+  await client.connect(transport);
+  return { session: provider.snapshot(), client };
 }
