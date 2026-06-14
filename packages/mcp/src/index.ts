@@ -1,5 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { FetchLike, Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { registerTool, type Tool, type ToolTier } from "@construct/tools";
 
 /**
@@ -52,6 +54,45 @@ export interface AdaptOptions {
 export interface McpClientOptions {
   name?: string;
   version?: string;
+}
+
+/** Wire transport used to reach a remote MCP server over http(s). */
+export type McpTransportKind = "http" | "sse";
+
+export interface McpConnectConfig {
+  /** Absolute http(s) URL of the MCP server endpoint. */
+  url: string;
+  /** "http" = Streamable HTTP (preferred); "sse" = legacy Server-Sent Events. */
+  transport: McpTransportKind;
+  /** Static headers sent on every request (e.g. an Authorization bearer token). */
+  headers?: Record<string, string>;
+  /** Identifies this client to the server. */
+  client?: McpClientOptions;
+}
+
+/** A fetch that merges static headers into every request the transport makes. */
+function headerInjectingFetch(headers: Record<string, string>): FetchLike {
+  return (url, init) => fetch(url, { ...init, headers: { ...init?.headers, ...headers } });
+}
+
+function createTransport(config: McpConnectConfig): Transport {
+  const url = new URL(config.url);
+  const fetchImpl = config.headers ? headerInjectingFetch(config.headers) : undefined;
+  if (config.transport === "sse") {
+    return new SSEClientTransport(url, { fetch: fetchImpl });
+  }
+  return new StreamableHTTPClientTransport(url, { fetch: fetchImpl });
+}
+
+/**
+ * Connect to a remote MCP server over http(s) and return a ready {@link McpClient}.
+ * Keeps the MCP SDK's transport classes inside this package, so a host depends
+ * only on Construct's surface. The caller owns the connection — `close()` it.
+ */
+export async function connectMcp(config: McpConnectConfig): Promise<McpClient> {
+  const client = new McpClient(config.client);
+  await client.connect(createTransport(config));
+  return client;
 }
 
 /**
