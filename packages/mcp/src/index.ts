@@ -28,7 +28,7 @@ import { registerTool, type Tool, type ToolTier } from "@construct/tools";
  * classifies tools via {@link AdaptOptions.tierFor}.
  */
 
-export type { Transport };
+export type { Transport, OAuthTokens, OAuthClientInformationMixed };
 
 /** A tool as advertised by an MCP server. */
 export interface McpToolInfo {
@@ -113,13 +113,56 @@ function createTransport(config: McpConnectConfig): Transport {
 }
 
 /**
+ * Cap on a connect / OAuth handshake. A slow or hostile MCP server must never pin
+ * a request — or a whole agent run — open indefinitely; on expiry we abort and
+ * surface a clear error. Tuned generously: discovery + DCR can be several round-trips.
+ */
+const HANDSHAKE_TIMEOUT_MS = 30_000;
+
+/** Thrown when {@link withHandshakeTimeout} fires; lets callers tell it apart. */
+export class McpHandshakeTimeoutError extends Error {
+  constructor(label: string) {
+    super(`MCP ${label} timed out after ${HANDSHAKE_TIMEOUT_MS}ms`);
+    this.name = "McpHandshakeTimeoutError";
+  }
+}
+
+/**
+ * Race a network handshake against {@link HANDSHAKE_TIMEOUT_MS}. On timeout we run
+ * `onTimeout` (close the socket so it can't leak) and reject; `Promise.race` can't
+ * cancel the underlying op, so releasing the transport is how we stop it pinning.
+ */
+async function withHandshakeTimeout<T>(
+  op: Promise<T>,
+  onTimeout: () => Promise<void>,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new McpHandshakeTimeoutError(label)), HANDSHAKE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([op, timeout]);
+  } catch (err) {
+    if (err instanceof McpHandshakeTimeoutError) await onTimeout().catch(() => undefined);
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * Connect to a remote MCP server over http(s) and return a ready {@link McpClient}.
  * Keeps the MCP SDK's transport classes inside this package, so a host depends
  * only on Construct's surface. The caller owns the connection — `close()` it.
  */
 export async function connectMcp(config: McpConnectConfig): Promise<McpClient> {
   const client = new McpClient(config.client);
-  await client.connect(createTransport(config));
+  await withHandshakeTimeout(
+    client.connect(createTransport(config)),
+    () => client.close(),
+    "connect",
+  );
   return client;
 }
 
@@ -258,9 +301,14 @@ class StoredOAuthProvider implements OAuthClientProvider {
   /** Set when the SDK asks to redirect the user agent for consent. */
   authorizationUrl: string | undefined;
   private readonly session: McpOauthSession;
+  private readonly onTokensRefreshed?: (tokens: OAuthTokens) => void | Promise<void>;
 
-  constructor(session: McpOauthSession) {
+  constructor(
+    session: McpOauthSession,
+    onTokensRefreshed?: (tokens: OAuthTokens) => void | Promise<void>,
+  ) {
     this.session = { ...session };
+    this.onTokensRefreshed = onTokensRefreshed;
   }
 
   /** Current session blob, including anything the SDK saved during the flow. */
@@ -300,6 +348,9 @@ class StoredOAuthProvider implements OAuthClientProvider {
 
   saveTokens(tokens: OAuthTokens): void {
     this.session.tokens = tokens;
+    // Fire-and-forget: the host persists refreshed tokens out of band. The SDK's
+    // saveTokens is sync, so we don't await — a failed write only costs a refresh.
+    void this.onTokensRefreshed?.(tokens);
   }
 
   redirectToAuthorization(authorizationUrl: URL): void {
@@ -350,7 +401,11 @@ export async function beginMcpOauth(
   });
   const client = new McpClient(config.client);
   try {
-    await client.connect(createTransport({ ...config, authProvider: provider }));
+    await withHandshakeTimeout(
+      client.connect(createTransport({ ...config, authProvider: provider })),
+      () => client.close(),
+      "OAuth begin",
+    );
     // The server accepted the connection without OAuth — nothing to authorize.
     await client.close().catch(() => undefined);
     throw new Error("MCP server did not require OAuth authorization");
@@ -388,8 +443,52 @@ export async function finishMcpOauth(
     ...config,
     authProvider: provider,
   });
-  await transport.finishAuth(params.code);
+  await withHandshakeTimeout(
+    transport.finishAuth(params.code),
+    () => transport.close(),
+    "OAuth token exchange",
+  );
   const client = new McpClient(config.client);
-  await client.connect(transport);
+  await withHandshakeTimeout(client.connect(transport), () => client.close(), "connect");
   return { session: provider.snapshot(), client };
+}
+
+/** Stored OAuth credentials a host replays to reconnect an authorized MCP server. */
+export interface McpOauthCredentials {
+  /** The callback URL registered as `redirect_uri`; must match the original grant. */
+  redirectUri: string;
+  /** Access/refresh tokens from the completed flow. */
+  tokens: OAuthTokens;
+  /** Client credentials from dynamic registration, needed to refresh. */
+  clientInformation?: OAuthClientInformationMixed;
+}
+
+/**
+ * Reconnect to an MCP server using previously stored OAuth tokens. Seeds a provider
+ * from {@link McpOauthCredentials}; the SDK attaches the access token and, on a 401,
+ * silently refreshes it. `onTokensRefreshed` is invoked whenever the SDK persists a
+ * new token set so the host can write it back to its vault. The caller owns the
+ * connection — `close()` it.
+ */
+export async function connectMcpWithOauth(
+  config: McpConnectConfig,
+  credentials: McpOauthCredentials,
+  onTokensRefreshed: (tokens: OAuthTokens) => void | Promise<void>,
+): Promise<McpClient> {
+  const provider = new StoredOAuthProvider(
+    {
+      redirectUri: credentials.redirectUri,
+      state: "",
+      tokens: credentials.tokens,
+      clientInformation: credentials.clientInformation,
+    },
+    onTokensRefreshed,
+  );
+  const client = new McpClient(config.client);
+  await withHandshakeTimeout(
+    client.connect(createTransport({ ...config, authProvider: provider })),
+    () => client.close(),
+    "connect",
+  );
+  return client;
 }
