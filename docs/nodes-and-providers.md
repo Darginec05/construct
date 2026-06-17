@@ -17,6 +17,13 @@ The `agent` executor resolves declared tool names through `getTool(name)` and
 advertises each as a `ToolSpec` to the provider. An unknown tool name fails the
 run fast.
 
+Both `agent` and `classifier` accept a **`PromptSource`** for their
+`system`/`prompt` — an inline template or a `PromptRef` resolved at runtime via
+`getPrompt(ref)`. A registry ref's declared `vars` are bound against run state
+and interpolated into its body; a referenced prompt with no host resolver fails
+the node. See [dsl.md](./dsl.md#prompt-sources) and
+[engine.md](./engine.md#per-run-injection-providers--tools--prompts).
+
 ## `@construct/providers` ✅ — the model abstraction
 
 A provider-neutral chat interface so a flow can mix models (Haiku for a router,

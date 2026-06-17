@@ -25,6 +25,21 @@ export interface ValidateOptions {
   scopeVariables?: string[];
 }
 
+/**
+ * Whether an agent `system`/`prompt` source carries content: a non-empty inline
+ * template, a registry {@link PromptRef} (object with a `ref`), or an array with
+ * at least one such part.
+ */
+function hasPromptSource(value: unknown): boolean {
+  if (typeof value === "string") return value.trim() !== "";
+  if (Array.isArray(value)) return value.some(hasPromptSource);
+  if (value && typeof value === "object") {
+    const ref = (value as Record<string, unknown>).ref;
+    return typeof ref === "string" && ref.trim() !== "";
+  }
+  return false;
+}
+
 /** Collect the root variable names referenced by any expression in a value tree. */
 function collectRefs(value: unknown, into: Set<string>): void {
   if (typeof value === "string") {
@@ -119,8 +134,8 @@ export function validateFlow(flow: Flow, opts: ValidateOptions = {}): Validation
 
     if (node.type === "agent") {
       const cfg = node.config as Record<string, unknown>;
-      const hasPrompt = typeof cfg.prompt === "string" && cfg.prompt.trim() !== "";
-      const hasSystem = typeof cfg.system === "string" && cfg.system.trim() !== "";
+      const hasPrompt = hasPromptSource(cfg.prompt);
+      const hasSystem = hasPromptSource(cfg.system);
       if (!hasPrompt && !hasSystem) {
         issues.push({
           level: "warning",

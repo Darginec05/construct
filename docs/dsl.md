@@ -48,6 +48,8 @@ which **output handle** an edge leaves from — that is how branching works
 |------|------------|
 | `DataType` | `"text" \| "image" \| "file" \| "audio" \| "json" \| "any"` (multimodal port type) |
 | `Expr` | a string evaluated against run state. Convention: `$.channel` reads a channel, `{{channel}}` interpolates into a string, a bare literal is used as-is |
+| `PromptRef` | `{ ref, vars? }` — a reference to a host-managed prompt, resolved to text at runtime. `vars` is a record of `Expr` bound against run state and interpolated into the resolved body. See [Prompt sources](#prompt-sources) |
+| `PromptSource` | `Expr \| PromptRef` — an inline template **or** a registry reference; used for the agent `system`/`prompt` and the router `prompt` |
 | `ModelRef` | `{ provider, model, temperature?(0–2), maxTokens?, cache?, params? }` |
 | `Budget` | `{ maxTokens?, maxUsd?, maxSteps? }` — cost guardrail, per node/loop/flow |
 | `Reducer` | `"lastValue" \| "append" \| "merge"` — how concurrent channel writes combine |
@@ -64,8 +66,8 @@ Every built-in ships a typed `configSchema` and a set of output handles
 |------|----------|-----------|---------|
 | `input` | io | `schema`: record `field → DataType` | `out` |
 | `output` | io | `from`: `Expr` or record of `Expr` (a named bundle) | — (terminal) |
-| `agent` | model | `model`, `system?`, `prompt?`, `tools[]`, `toolChoice` (auto/required/none), `maxSteps`(8), `output` (`"text"` or `{schema}`), `budget?`, `writeTo?` | `out` |
-| `classifier` | model | `model`, `prompt?`, `classes[]` (≥1), `writeTo?` | **dynamic** — one per class |
+| `agent` | model | `model`, `system?` (`PromptSource` or an ordered array of them), `prompt?` (`PromptSource`), `tools[]`, `toolChoice` (auto/required/none), `maxSteps`(8), `output` (`"text"` or `{schema}`), `budget?`, `writeTo?` | `out` |
+| `classifier` | model | `model`, `prompt?` (`PromptSource`), `classes[]` (≥1), `writeTo?` | **dynamic** — one per class |
 | `branch` | control | `condition`: `Expr` | `true`, `false` |
 | `switch` | control | `on`: `Expr`, `cases[]` (≥1) | **dynamic** — cases + `default` |
 | `loop` | control | `body`: sub-flow id, `until?`, `maxIterations`(5), `budget?`, `writeTo?` | `out` |
@@ -92,6 +94,41 @@ Every built-in ships a typed `configSchema` and a set of output handles
 
 `writeTo` appears on most nodes: it stores the node's result into a named state
 channel (see [engine.md](./engine.md#channels--reducers)).
+
+## Prompt sources
+
+The agent `system`/`prompt` and the router `prompt` accept a **`PromptSource`** —
+either an inline template `Expr`, or a **`PromptRef`** to a prompt managed
+*outside* the flow (a host-provided registry). The DSL stays decoupled from any
+registry: a `PromptRef` only carries a stable `ref` (id/slug) and `vars`.
+
+```jsonc
+{
+  "type": "agent",
+  "config": {
+    "model": { "provider": "anthropic", "model": "claude-..." },
+    // A registry persona, layered with a flow-specific addendum.
+    "system": [
+      { "ref": "code-reviewer", "vars": { "language": "$.lang" } },
+      "Keep findings under five bullet points."
+    ],
+    "prompt": "{{diff}}"
+  }
+}
+```
+
+- **`system`** may be a single `PromptSource` **or an ordered array** of them; the
+  parts are resolved and joined with blank lines (registry persona + addendum).
+- **`vars`** declares the dynamic values a referenced prompt expects, each an
+  `Expr` evaluated against run state. At runtime the host resolves `ref` to a
+  template body; the engine binds these vars and interpolates the body against
+  `{ ...state, ...vars }`. Declaring vars keeps
+  the prompt's contract visible in the flow without inlining the prompt text.
+
+Resolution is the host's job, mirroring per-run `providers`/`tools` injection —
+see [engine.md](./engine.md#executors). A `PromptRef` whose `ref` the host does
+not resolve fails the node (an inline source with neither prompt nor system only
+warns).
 
 ## Validation
 

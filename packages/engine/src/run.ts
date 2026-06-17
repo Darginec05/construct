@@ -101,14 +101,16 @@ export async function runFlow(
     const onToolApproval = options.onToolApproval;
     const providers = options.providers;
     const tools = options.tools;
+    const prompts = options.prompts;
     const ctx: ExecutorContext = {
       config: node.config,
       state,
-      evaluate: (e) => evaluate(e, state),
+      evaluate: (e, scope) => evaluate(e, scope ? { ...state, ...scope } : state),
       onDelta: (text) => emit({ type: "token", nodeId, data: text }),
       onUsage: (usage) => emit({ type: "usage", nodeId, data: usage }),
       getProvider: providers ? (id) => providers[id] : undefined,
       getTool: tools ? (name) => tools[name] : undefined,
+      getPrompt: prompts ? (ref) => prompts[ref] : undefined,
       requestApproval: onToolApproval
         ? (req) => Promise.resolve(onToolApproval({ nodeId, ...req }))
         : undefined,
