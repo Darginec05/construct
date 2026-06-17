@@ -44,6 +44,33 @@ const OutputConfig = z.object({
 // --- model ------------------------------------------------------------------
 
 /**
+ * A reference to a prompt managed outside the flow (a host-provided registry),
+ * resolved to text at runtime. The DSL stays decoupled from any registry: it
+ * only carries the `ref` (a stable id/slug) and an optional pinned `version`.
+ *
+ * `vars` declares the dynamic values the referenced prompt expects, each bound
+ * to a DSL expression evaluated against run state (e.g. `{ context: "$.rag" }`).
+ * At runtime the host resolves `ref` to a template body; the engine binds these
+ * vars and interpolates the body against `{ ...state, ...vars }`. Declaring vars
+ * explicitly keeps the prompt's contract visible in the flow without inlining
+ * the prompt text itself.
+ */
+export const PromptRefSchema = z.object({
+  ref: z.string().min(1),
+  version: z.string().optional(),
+  vars: z.record(ExprSchema).optional(),
+});
+export type PromptRef = z.infer<typeof PromptRefSchema>;
+
+/**
+ * A prompt source: either an inline template expression, or a {@link PromptRef}
+ * to a registry-managed prompt. Used for the agent `system`/`prompt` and the
+ * router `prompt`.
+ */
+export const PromptSourceSchema = z.union([ExprSchema, PromptRefSchema]);
+export type PromptSource = z.infer<typeof PromptSourceSchema>;
+
+/**
  * The workhorse: a model call that may run a multi-step tool-use loop. With
  * `output: { schema }` it returns structured JSON; with tools + maxSteps it is
  * a full agent loop. `model` is per-node so a flow can mix Haiku and Sonnet.
@@ -54,8 +81,13 @@ const OutputConfig = z.object({
  */
 const AgentConfig = z.object({
   model: ModelRefSchema,
-  system: z.string().optional(),
-  prompt: ExprSchema.optional(),
+  /**
+   * System instructions. A single part (inline template or registry ref) or an
+   * ordered array of parts, joined with blank lines — lets a flow layer a shared
+   * registry persona with a flow-specific addendum.
+   */
+  system: z.union([PromptSourceSchema, z.array(PromptSourceSchema)]).optional(),
+  prompt: PromptSourceSchema.optional(),
   tools: z.array(z.string()).default([]),
   toolChoice: z.enum(["auto", "required", "none"]).default("auto"),
   /** Cap on tool-use iterations before the loop is force-closed. */
@@ -88,7 +120,7 @@ export type RouterClass = z.infer<typeof RouterClassSchema>;
 const RouterConfig = z
   .object({
     model: ModelRefSchema,
-    prompt: ExprSchema.optional(),
+    prompt: PromptSourceSchema.optional(),
     classes: z.array(RouterClassSchema).min(1),
     /** Add a built-in "fallback" handle for low-confidence / no-match inputs. */
     fallback: z.boolean().optional(),

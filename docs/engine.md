@@ -78,6 +78,29 @@ getExecutor(type); getFunction(name);
 If a node's `type` has no executor and isn't a control-flow node, the run fails
 fast with a clear error.
 
+### Per-run injection (providers · tools · prompts)
+
+The engine stays dependency-agnostic: it never knows what a provider, tool, or
+prompt *is*. A host injects them per run through `RunOptions`, and executors
+resolve them through `ExecutorContext`, falling back to the relevant process
+registry when an injection is absent:
+
+```ts
+await runFlow(flow, {
+  providers: { anthropic: provider }, // ctx.getProvider(id) — per-tenant model keys
+  tools:     { lookup: tool },        // ctx.getTool(name)    — per-tenant tools
+  prompts:   { "code-reviewer": body }, // ctx.getPrompt(ref) — registry prompt bodies
+});
+```
+
+This per-run boundary keeps a multi-tenant host (e.g. a cloud runner) from
+leaking one tenant's keys/tools/prompts into a process-global registry shared
+across runs. For **prompts**: the host resolves each DSL `PromptRef.ref` — and
+the `version` it chooses to serve — to a template body before the run. The
+`agent`/`classifier` executors then bind the ref's declared `vars` (each
+evaluated against state) and interpolate the body against `{ ...state, ...vars }`
+via `ctx.evaluate(body, vars)`. See [dsl.md](./dsl.md#prompt-sources).
+
 ## Human pauses
 
 `human` nodes are **durable pauses**. When reached, the run surfaces a pause

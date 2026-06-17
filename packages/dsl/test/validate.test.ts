@@ -91,6 +91,54 @@ describe("validateFlow — config & references", () => {
     expect(errs.some((e) => e.nodeId === "a")).toBe(true);
   });
 
+  it("accepts a registry PromptRef as the agent system/prompt source", () => {
+    const flow = makeFlow({
+      nodes: [
+        { id: "in", type: "input", config: { schema: { x: "text" } } },
+        {
+          id: "a",
+          type: "agent",
+          config: {
+            model: { provider: "anthropic", model: "m" },
+            system: { ref: "reviewer", vars: { focus: "$.x" } },
+            writeTo: "out",
+          },
+        },
+        { id: "out", type: "output", config: { from: "$.out" } },
+      ],
+      edges: [
+        { id: "e1", source: "in", target: "a" },
+        { id: "e2", source: "a", target: "out" },
+      ],
+    });
+    expect(errors(flow)).toEqual([]);
+    // A PromptRef counts as content, so no "neither prompt nor system" warning.
+    expect(messages(flow).some((m) => m.includes("neither a prompt"))).toBe(false);
+  });
+
+  it("validates expressions bound to a PromptRef's vars", () => {
+    const flow = makeFlow({
+      nodes: [
+        { id: "in", type: "input", config: { schema: { x: "text" } } },
+        {
+          id: "a",
+          type: "agent",
+          config: {
+            model: { provider: "anthropic", model: "m" },
+            system: { ref: "reviewer", vars: { focus: "$.ghost" } },
+            writeTo: "out",
+          },
+        },
+        { id: "out", type: "output", config: { from: "$.out" } },
+      ],
+      edges: [
+        { id: "e1", source: "in", target: "a" },
+        { id: "e2", source: "a", target: "out" },
+      ],
+    });
+    expect(messages(flow).some((m) => m.includes('unknown variable "ghost"'))).toBe(true);
+  });
+
   it("no longer errors on a writeTo to an undeclared channel (it defines a variable)", () => {
     const flow = makeFlow({
       channels: [],

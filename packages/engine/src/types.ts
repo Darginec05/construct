@@ -85,6 +85,17 @@ export interface RunOptions {
    * leaking them into the process-global registry shared across tenants.
    */
   tools?: Record<string, unknown>;
+  /**
+   * Per-run prompt bodies, keyed by the DSL `PromptRef.ref`. Mirrors
+   * {@link providers} / {@link tools}: the engine forwards these to executors via
+   * `ExecutorContext.getPrompt` WITHOUT knowing where a prompt comes from (it
+   * stays registry-agnostic). A host (the cloud runner) resolves each `ref` —
+   * including which `version` to serve — to its template body before the run and
+   * injects the map here; the engine then binds the ref's declared `vars` and
+   * interpolates the body against run state. When absent, an agent/router that
+   * uses a `PromptRef` resolves to empty text.
+   */
+  prompts?: Record<string, string>;
   onEvent?: (event: RunEvent) => void;
   /** Resolves a human pause inline; when absent, the run pauses. */
   onHuman?: (
@@ -133,8 +144,12 @@ export interface RunResult {
 export interface ExecutorContext {
   config: Record<string, unknown>;
   state: RunState;
-  /** Evaluate a DSL expression (or bundle) against the current state. */
-  evaluate(expr: unknown): unknown;
+  /**
+   * Evaluate a DSL expression (or bundle) against the current state. `scope`
+   * adds extra bindings layered on top of state (they shadow same-named
+   * channels) — used to resolve a prompt ref's declared `vars` inside its body.
+   */
+  evaluate(expr: unknown, scope?: Record<string, unknown>): unknown;
   /** Emit a streamed text chunk as a `token` event for the current node. */
   onDelta(text: string): void;
   /** Report token usage for one model turn as a `usage` event. */
@@ -153,6 +168,13 @@ export interface ExecutorContext {
    * is absent or returns undefined.
    */
   getTool?: (name: string) => unknown;
+  /**
+   * Resolve a registry prompt body by `ref`, set from `RunOptions.prompts`.
+   * Returns the raw template (with `{{var}}` placeholders) or `undefined` when
+   * unknown; prompt-aware executors (@construct/nodes) bind the ref's `vars` and
+   * interpolate it. Absent when the host injected no prompts.
+   */
+  getPrompt?: (ref: string) => string | undefined;
   /**
    * Request human approval for a gated tool call. The engine injects the
    * current node id. Absent when the host configured no approver — callers must

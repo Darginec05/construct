@@ -32,6 +32,62 @@ function patch(writeTo: unknown, value: unknown): ExecutorResult {
   return typeof writeTo === "string" ? { patch: { [writeTo]: value } } : {};
 }
 
+/** A reference to a registry-managed prompt, as carried in the DSL. */
+interface PromptRef {
+  ref: string;
+  version?: string;
+  vars?: Record<string, unknown>;
+}
+
+function isPromptRef(value: unknown): value is PromptRef {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { ref?: unknown }).ref === "string"
+  );
+}
+
+/**
+ * Resolve one prompt part to text. An inline template is interpolated against
+ * run state; a {@link PromptRef} is fetched via `ctx.getPrompt`, its declared
+ * `vars` bound (each evaluated against state), then its body interpolated
+ * against `{ ...state, ...vars }`.
+ */
+function resolvePromptPart(ctx: ExecutorContext, part: unknown, node: string): string {
+  if (part == null) return "";
+  if (isPromptRef(part)) {
+    const body = ctx.getPrompt?.(part.ref);
+    if (body == null) {
+      throw new Error(`${node} node: prompt "${part.ref}" is not available`);
+    }
+    const scope: Record<string, unknown> = {};
+    if (part.vars) {
+      for (const [key, expr] of Object.entries(part.vars)) {
+        scope[key] = ctx.evaluate(expr);
+      }
+    }
+    const out = ctx.evaluate(body, scope);
+    return out == null ? "" : String(out);
+  }
+  const out = ctx.evaluate(part);
+  return out == null ? "" : String(out);
+}
+
+/**
+ * Resolve an agent `system` / `prompt` (or router `prompt`) source to text. A
+ * single part is resolved directly; an ordered array (system layering) is
+ * resolved part-by-part and joined with blank lines.
+ */
+function resolvePromptSource(ctx: ExecutorContext, src: unknown, node: string): string {
+  if (Array.isArray(src)) {
+    return src
+      .map((part) => resolvePromptPart(ctx, part, node))
+      .filter((text) => text !== "")
+      .join("\n\n");
+  }
+  return resolvePromptPart(ctx, src, node);
+}
+
 function requireProvider(
   ctx: ExecutorContext,
   model: ModelRef | undefined,
@@ -204,14 +260,14 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
   );
 
   const messages: ChatMessage[] = [];
-  let system = typeof ctx.config.system === "string" ? ctx.config.system : "";
+  let system = resolvePromptSource(ctx, ctx.config.system, "agent");
   if (structured) {
     const note = `When you have the final answer, call the ${RESPOND_TOOL} tool with the structured result. Do not answer in plain text.`;
     system = system ? `${system}\n\n${note}` : note;
   }
   if (system) messages.push({ role: "system", content: system });
-  const prompt = ctx.evaluate(ctx.config.prompt);
-  messages.push({ role: "user", content: prompt == null ? "" : String(prompt) });
+  const prompt = resolvePromptSource(ctx, ctx.config.prompt, "agent");
+  messages.push({ role: "user", content: prompt });
 
   let totalTokens = 0;
   let finalText = "";
@@ -404,7 +460,7 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
   const fallback = ctx.config.fallback === true;
   const names = classes.map((c) => c.name);
   const choices = fallback ? [...names, ROUTER_FALLBACK] : names;
-  const prompt = ctx.evaluate(ctx.config.prompt);
+  const prompt = resolvePromptSource(ctx, ctx.config.prompt, "router");
 
   const res = await provider.chat(
     [
@@ -415,7 +471,7 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
           `Pick the branch whose description best matches the input.\n\n` +
           describeClasses(classes, fallback),
       },
-      { role: "user", content: prompt == null ? "" : String(prompt) },
+      { role: "user", content: prompt },
     ],
     {
       model: model!.model,
