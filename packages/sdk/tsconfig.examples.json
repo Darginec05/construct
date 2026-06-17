@@ -3,7 +3,8 @@
   "compilerOptions": {
     "rootDir": "examples",
     "outDir": "examples-dist",
-    "noEmit": false
+    "noEmit": false,
+    "types": ["node"]
   },
   "include": ["examples"]
 }
