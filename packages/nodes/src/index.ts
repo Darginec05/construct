@@ -35,7 +35,6 @@ function patch(writeTo: unknown, value: unknown): ExecutorResult {
 /** A reference to a registry-managed prompt, as carried in the DSL. */
 interface PromptRef {
   ref: string;
-  version?: string;
   vars?: Record<string, unknown>;
 }
 

@@ -97,7 +97,7 @@ export async function runFlow(
     const node = nodesById.get(nodeId);
     if (!node) continue;
 
-    emit({ type: "node-start", nodeId });
+    emit({ type: "node-start", nodeId, data: node.config });
     const onToolApproval = options.onToolApproval;
     const providers = options.providers;
     const tools = options.tools;
@@ -136,7 +136,13 @@ export async function runFlow(
 
     if (outcome.patch) applyPatch(state, outcome.patch, channels);
     if (outcome.output !== undefined) runOutput = outcome.output;
-    emit({ type: "node-finish", nodeId });
+    // Surface what the node produced for telemetry: an output node's value, else
+    // the state patch it wrote (the meaningful "node output" for leaf executors).
+    emit({
+      type: "node-finish",
+      nodeId,
+      data: outcome.output !== undefined ? outcome.output : (outcome.patch ?? null),
+    });
 
     const handle = resolveHandle(node, outcome, ctx);
     for (const edge of outEdges.get(nodeId) ?? []) {

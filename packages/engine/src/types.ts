@@ -89,11 +89,11 @@ export interface RunOptions {
    * Per-run prompt bodies, keyed by the DSL `PromptRef.ref`. Mirrors
    * {@link providers} / {@link tools}: the engine forwards these to executors via
    * `ExecutorContext.getPrompt` WITHOUT knowing where a prompt comes from (it
-   * stays registry-agnostic). A host (the cloud runner) resolves each `ref` —
-   * including which `version` to serve — to its template body before the run and
-   * injects the map here; the engine then binds the ref's declared `vars` and
-   * interpolates the body against run state. When absent, an agent/router that
-   * uses a `PromptRef` resolves to empty text.
+   * stays registry-agnostic). A host (the cloud runner) resolves each `ref` to
+   * its template body before the run and injects the map here; the engine then
+   * binds the ref's declared `vars` and interpolates the body against run state.
+   * When a `PromptRef`'s `ref` is absent from this map, the agent/router node
+   * fails the run.
    */
   prompts?: Record<string, string>;
   onEvent?: (event: RunEvent) => void;

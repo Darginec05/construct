@@ -46,7 +46,7 @@ const OutputConfig = z.object({
 /**
  * A reference to a prompt managed outside the flow (a host-provided registry),
  * resolved to text at runtime. The DSL stays decoupled from any registry: it
- * only carries the `ref` (a stable id/slug) and an optional pinned `version`.
+ * only carries the `ref` (a stable id/slug).
  *
  * `vars` declares the dynamic values the referenced prompt expects, each bound
  * to a DSL expression evaluated against run state (e.g. `{ context: "$.rag" }`).
@@ -57,7 +57,6 @@ const OutputConfig = z.object({
  */
 export const PromptRefSchema = z.object({
   ref: z.string().min(1),
-  version: z.string().optional(),
   vars: z.record(ExprSchema).optional(),
 });
 export type PromptRef = z.infer<typeof PromptRefSchema>;
