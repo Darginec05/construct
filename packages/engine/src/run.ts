@@ -7,6 +7,7 @@ import {
   type FlowNode,
 } from "@construct/dsl";
 import { applyPatch, channelMap, initState } from "./channels.js";
+import { evalCondition } from "./condition.js";
 import { evaluate, truthy } from "./expr.js";
 import { getExecutor } from "./executors.js";
 import type {
@@ -261,7 +262,7 @@ function resolveHandle(
   ctx: ExecutorContext,
 ): string {
   if (node.type === "branch") {
-    return truthy(ctx.evaluate(node.config.condition)) ? "true" : "false";
+    return evalCondition(node.config.condition, (e) => ctx.evaluate(e)) ? "true" : "false";
   }
   if (node.type === "switch") {
     const on = String(ctx.evaluate(node.config.on));

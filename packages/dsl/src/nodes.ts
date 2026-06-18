@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   BudgetSchema,
   ExprSchema,
+  type DataType,
   DataTypeSchema,
   ModelRefSchema,
   ToolTierSchema,
@@ -28,9 +29,37 @@ export type NodeCategory = z.infer<typeof NodeCategorySchema>;
 
 // --- io ---------------------------------------------------------------------
 
-/** Entry point. Declares the (multimodal) input contract: field -> data type. */
+/**
+ * One field of the input contract. Accepts the shorthand `"text"` (a bare type)
+ * or a full descriptor; the shorthand is normalized to `{ type }` so every
+ * consumer sees the object form. `fields` types a structured value recursively,
+ * replacing the previously-opaque flat `json`. `default` is only meaningful for
+ * optional fields (a value to assume when the caller omits the field).
+ */
+export type InputField = {
+  type: DataType;
+  required: boolean;
+  description?: string;
+  default?: unknown;
+  fields?: Record<string, InputField>;
+};
+
+const InputFieldSchema: z.ZodType<InputField, z.ZodTypeDef, unknown> = z.lazy(() =>
+  z.preprocess(
+    (v) => (typeof v === "string" ? { type: v } : v),
+    z.object({
+      type: DataTypeSchema.default("any"),
+      required: z.boolean().default(true),
+      description: z.string().min(1).optional(),
+      default: z.unknown().optional(),
+      fields: z.record(InputFieldSchema).optional(),
+    }),
+  ),
+);
+
+/** Entry point. Declares the (multimodal) input contract: field -> descriptor. */
 const InputConfig = z.object({
-  schema: z.record(DataTypeSchema).default({}),
+  schema: z.record(InputFieldSchema).default({}),
 });
 
 /**
@@ -124,6 +153,9 @@ const RouterConfig = z
     /** Add a built-in "fallback" handle for low-confidence / no-match inputs. */
     fallback: z.boolean().optional(),
     writeTo: z.string().optional(),
+    /** Optional variable to store the model's one-line rationale for the pick,
+     *  so a downstream node can log or branch on *why* it routed. */
+    reasonTo: z.string().optional(),
   })
   .superRefine((cfg, ctx) => {
     const names = cfg.classes.map((c) => c.name);
@@ -150,9 +182,57 @@ const RouterConfig = z
 
 // --- control ----------------------------------------------------------------
 
+/**
+ * Comparison operators for a {@link ConditionRule}. The unary ones
+ * (`empty`/`notEmpty`/`truthy`/`falsy`) test the left side alone and ignore
+ * `right`; the rest compare `left` against `right`.
+ */
+export const ComparatorSchema = z.enum([
+  "eq",
+  "neq",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "contains",
+  "notContains",
+  "empty",
+  "notEmpty",
+  "truthy",
+  "falsy",
+]);
+export type Comparator = z.infer<typeof ComparatorSchema>;
+
+/** Comparators that test `left` alone — `right` is omitted in the editor. */
+export const UNARY_COMPARATORS = new Set<Comparator>(["empty", "notEmpty", "truthy", "falsy"]);
+
+/**
+ * A single comparison. `left` and `right` are expressions (`$.x` / `{{tpl}}` /
+ * literal), so either side can read run state or be a constant.
+ */
+export const ConditionRuleSchema = z.object({
+  left: ExprSchema,
+  op: ComparatorSchema,
+  right: ExprSchema.optional(),
+});
+export type ConditionRule = z.infer<typeof ConditionRuleSchema>;
+
+/**
+ * A structured boolean condition: a flat list of rules joined by one
+ * combinator. Replaces the old free-text `condition`, which could only test
+ * truthiness of a single value (the expression language has no operators).
+ */
+export const ConditionSchema = z.object({
+  combinator: z.enum(["and", "or"]).default("and"),
+  rules: z.array(ConditionRuleSchema).default([]),
+});
+export type Condition = z.infer<typeof ConditionSchema>;
+
 /** Boolean split. Output handles: "true" / "false". */
 const BranchConfig = z.object({
-  condition: ExprSchema,
+  // A bare expression string is accepted for back-compat and as a raw escape
+  // hatch — the engine lifts it into a single `{ left, op: "truthy" }` rule.
+  condition: z.union([ConditionSchema, ExprSchema]),
 });
 
 /** Multi-way split. Output handles: the cases plus "default". */

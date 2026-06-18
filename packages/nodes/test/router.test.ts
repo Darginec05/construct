@@ -125,10 +125,27 @@ describe("router node", () => {
     expect(res.output).toBe("went fallback");
   });
 
-  it("defaults to the first class when the pick is unknown and no fallback", async () => {
+  it("fails loudly when the pick is unknown and no fallback is wired", async () => {
     provider(toolCallResult("sideways"));
     const res = await runFlow(buildFlow(false), { input: { text: "meh" } });
+    expect(res.status).toBe("failed");
+    expect(res.error).toContain("did not return a listed route");
+  });
+
+  it("routes to fallback when the pick is unknown and fallback is on", async () => {
+    provider(toolCallResult("sideways"));
+    const res = await runFlow(buildFlow(true), { input: { text: "meh" } });
+    expect(res.state.choice).toBe("fallback");
+    expect(res.output).toBe("went fallback");
+  });
+
+  it("stores the decision reason in reasonTo when set", async () => {
+    provider(toolCallResult("positive", "clearly grateful"));
+    const flow = buildFlow(false);
+    (flow.nodes[1]!.config as { reasonTo?: string }).reasonTo = "why";
+    const res = await runFlow(flow, { input: { text: "thanks!" } });
     expect(res.state.choice).toBe("positive");
+    expect(res.state.why).toBe("clearly grateful");
   });
 
   it("streams the decision reason as a token event", async () => {

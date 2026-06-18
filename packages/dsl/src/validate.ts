@@ -144,6 +144,98 @@ export function validateFlow(flow: Flow, opts: ValidateOptions = {}): Validation
         });
       }
     }
+
+    if (node.type === "human") {
+      const cfg = node.config as Record<string, unknown>;
+      // Custom exits become this node's output handles; a blank or duplicate
+      // name silently breaks edge-handle resolution downstream.
+      if (Array.isArray(cfg.exits)) {
+        const seen = new Set<string>();
+        for (const exit of cfg.exits) {
+          if (typeof exit !== "string" || exit.trim() === "") {
+            issues.push({
+              level: "error",
+              nodeId: node.id,
+              message: `human exit names must be non-empty`,
+            });
+          } else if (seen.has(exit)) {
+            issues.push({
+              level: "error",
+              nodeId: node.id,
+              message: `duplicate human exit "${exit}"`,
+            });
+          } else {
+            seen.add(exit);
+          }
+        }
+      }
+      // collect/annotate capture a reply; without writeTo it goes nowhere.
+      // approve/select capture no value, so a writeTo there never fills.
+      const capturesText = cfg.mode === "collect" || cfg.mode === "annotate";
+      const hasWriteTo = typeof cfg.writeTo === "string" && cfg.writeTo.trim() !== "";
+      if (capturesText && !hasWriteTo) {
+        issues.push({
+          level: "warning",
+          nodeId: node.id,
+          message: `${String(cfg.mode)} captures a reply but has no writeTo — the input is discarded`,
+        });
+      } else if (!capturesText && cfg.mode !== undefined && hasWriteTo) {
+        issues.push({
+          level: "warning",
+          nodeId: node.id,
+          message: `${String(cfg.mode)} captures no value — writeTo "${String(cfg.writeTo)}" will stay empty`,
+        });
+      }
+    }
+
+    if (node.type === "branch") {
+      const cond = (node.config as Record<string, unknown>).condition;
+      const isEmpty =
+        cond == null ||
+        (typeof cond === "string" && cond.trim() === "") ||
+        (typeof cond === "object" &&
+          Array.isArray((cond as { rules?: unknown }).rules) &&
+          (cond as { rules: unknown[] }).rules.length === 0);
+      if (isEmpty) {
+        issues.push({
+          level: "warning",
+          nodeId: node.id,
+          message: `branch has no conditions — it will always take the false path`,
+        });
+      }
+    }
+
+    if (node.type === "router") {
+      const cfg = node.config as Record<string, unknown>;
+      // A router with no prompt classifies an empty string — it will pick a
+      // branch on no signal at all.
+      if (!hasPromptSource(cfg.prompt)) {
+        issues.push({
+          level: "warning",
+          nodeId: node.id,
+          message: `router has no prompt — it will classify empty input`,
+        });
+      }
+      // Class descriptions are what the model actually reads to decide; a bare
+      // name gives it almost nothing to route on.
+      const classes = Array.isArray(cfg.classes) ? cfg.classes : [];
+      const undescribed = classes
+        .filter(
+          (c): c is { name: string } =>
+            Boolean(c) &&
+            typeof c === "object" &&
+            typeof (c as { name?: unknown }).name === "string" &&
+            !hasPromptSource((c as { description?: unknown }).description),
+        )
+        .map((c) => c.name);
+      if (undescribed.length > 0) {
+        issues.push({
+          level: "warning",
+          nodeId: node.id,
+          message: `router routes have no description (${undescribed.join(", ")}) — the model only sees the name to decide`,
+        });
+      }
+    }
   }
 
   // Edges: endpoints exist; source handle is valid for the source node.
@@ -180,10 +272,46 @@ export function validateFlow(flow: Flow, opts: ValidateOptions = {}): Validation
     }
   }
 
-  const hasInput = flow.nodes.some((n) => n.type === "input");
+  // Splitting nodes (router/branch/switch) whose handles have no outgoing edge
+  // are dead ends: the node can pick a path the run can't follow. Warn per
+  // uncovered handle.
+  const handlesBySource = new Map<string, Set<string>>();
+  for (const edge of flow.edges) {
+    if (!edge.sourceHandle) continue;
+    const set = handlesBySource.get(edge.source);
+    if (set) set.add(edge.sourceHandle);
+    else handlesBySource.set(edge.source, new Set([edge.sourceHandle]));
+  }
+  for (const node of flow.nodes) {
+    if (node.type !== "router" && node.type !== "branch" && node.type !== "switch") continue;
+    const connected = handlesBySource.get(node.id) ?? new Set<string>();
+    const unwired = resolveNodeOutputs(node.type, node.config).filter((h) => !connected.has(h));
+    if (unwired.length > 0) {
+      issues.push({
+        level: "warning",
+        nodeId: node.id,
+        message: `${node.type} has output handles with no outgoing edge (${unwired.join(
+          ", ",
+        )}) — a path here is a dead end`,
+      });
+    }
+  }
+
+  const inputNodes = flow.nodes.filter((n) => n.type === "input");
   const hasOutput = flow.nodes.some((n) => n.type === "output");
-  if (!hasInput) {
+  if (inputNodes.length === 0) {
     issues.push({ level: "warning", message: "flow has no input node" });
+  }
+  // The engine seeds the run payload into every input node, so more than one
+  // makes the entry contract ambiguous. A flow has a single entry point.
+  if (inputNodes.length > 1) {
+    for (const node of inputNodes.slice(1)) {
+      issues.push({
+        level: "error",
+        nodeId: node.id,
+        message: "a flow may declare only one input node",
+      });
+    }
   }
   if (!hasOutput) {
     issues.push({ level: "warning", message: "flow has no output node" });
