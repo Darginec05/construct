@@ -97,7 +97,7 @@ export const supportHub = defineFlow("support-hub", "Enterprise support hub", (f
 
   billingGate
     .on("true")
-    .human({ mode: "approve", prompt: "Send this reply?", writeTo: draft })
+    .human({ mode: "approve", prompt: "Send this reply?" })
     .on("approved")
     .tool(sendReply, { args: { body: draft, ticketId }, resource: mailbox, writeTo: outbound })
     .to(out);

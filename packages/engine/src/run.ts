@@ -5,13 +5,15 @@ import {
   type Flow,
   type FlowEdge,
   type FlowNode,
+  type SwitchCase,
 } from "@construct/dsl";
 import { applyPatch, channelMap, initState } from "./channels.js";
-import { evalCondition } from "./condition.js";
+import { evalCondition, evalSwitch } from "./condition.js";
 import { evaluate, truthy } from "./expr.js";
 import { getExecutor } from "./executors.js";
 import type {
   ExecutorContext,
+  PausePoint,
   RunEvent,
   RunOptions,
   RunResult,
@@ -23,7 +25,7 @@ interface StepOutcome {
   handle?: string;
   output?: unknown;
   /** Set when the node (or a nested flow) pauses for a human. */
-  pause?: { nodeId: string; exits: string[] };
+  pause?: PausePoint;
 }
 
 type Emit = (event: RunEvent) => void;
@@ -71,18 +73,34 @@ export async function runFlow(
     }
   }
 
-  // Start at input nodes; fall back to roots (in-degree 0) when there are none.
-  const inputs = parsed.nodes
-    .filter((n) => n.type === "input")
-    .map((n) => n.id);
-  const queue: string[] =
-    inputs.length > 0
-      ? [...inputs]
-      : parsed.nodes
-          .filter((n) => (inDegree.get(n.id) ?? 0) === 0)
-          .map((n) => n.id);
+  const queue: string[] = [];
 
   emit({ type: "run-start", data: { flowId: parsed.id } });
+
+  // Resume path: don't re-run the paused human node. Apply its captured patch and
+  // seed the frontier with the out-edges of `resume.handle`, exactly as if the
+  // node had just finished and chosen that handle.
+  if (options.resume) {
+    const { nodeId, handle, patch } = options.resume;
+    if (!nodesById.has(nodeId)) {
+      return fail(parsed.id, state, `resume target "${nodeId}" not found`, emit, nodeId);
+    }
+    if (patch) applyPatch(state, patch, channels);
+    for (const edge of outEdges.get(nodeId) ?? []) {
+      if (edge.sourceHandle && edge.sourceHandle !== handle) continue;
+      enqueue(edge);
+    }
+  } else {
+    // Start at input nodes; fall back to roots (in-degree 0) when there are none.
+    const inputs = parsed.nodes.filter((n) => n.type === "input").map((n) => n.id);
+    const roots =
+      inputs.length > 0
+        ? inputs
+        : parsed.nodes
+            .filter((n) => (inDegree.get(n.id) ?? 0) === 0)
+            .map((n) => n.id);
+    for (const id of roots) queue.push(id);
+  }
 
   let runOutput: unknown;
   let steps = 0;
@@ -218,8 +236,15 @@ async function stepNode(
         const decision = await options.onHuman(node, ctx);
         return { patch: decision.patch, handle: decision.handle };
       }
+      const cfg = node.config as Record<string, unknown>;
       return {
-        pause: { nodeId: node.id, exits: resolveNodeOutputs(node.type, node.config) },
+        pause: {
+          nodeId: node.id,
+          exits: resolveNodeOutputs(node.type, node.config),
+          mode: typeof cfg.mode === "string" ? cfg.mode : undefined,
+          prompt: typeof cfg.prompt === "string" ? cfg.prompt : undefined,
+          writeTo: typeof cfg.writeTo === "string" ? cfg.writeTo : undefined,
+        },
       };
     }
     default: {
@@ -241,9 +266,8 @@ function resolveHandle(
     return evalCondition(node.config.condition, (e) => ctx.evaluate(e)) ? "true" : "false";
   }
   if (node.type === "switch") {
-    const on = String(ctx.evaluate(node.config.on));
-    const cases = (node.config.cases as string[]) ?? [];
-    return cases.includes(on) ? on : "default";
+    const cases = (node.config.cases as (SwitchCase | string)[]) ?? [];
+    return evalSwitch(node.config.on, cases, (e) => ctx.evaluate(e));
   }
   return outcome.handle ?? "out";
 }
@@ -260,6 +284,9 @@ function bubble(node: FlowNode, child: RunResult): StepOutcome {
     pause: {
       nodeId: `${node.id}/${child.pause?.nodeId ?? "?"}`,
       exits: child.pause?.exits ?? [],
+      mode: child.pause?.mode,
+      prompt: child.pause?.prompt,
+      writeTo: child.pause?.writeTo,
     },
   };
 }
@@ -294,6 +321,11 @@ async function runLoop(
   return {};
 }
 
+/** Per-item outcome, indexed by position so aggregation order is stable. */
+type MapItemResult =
+  | { kind: "ok"; output: unknown; delta: Record<string, unknown> }
+  | { kind: "error"; error: string | undefined };
+
 async function runMap(
   node: FlowNode,
   ctx: ExecutorContext,
@@ -305,30 +337,57 @@ async function runMap(
   const list = Array.isArray(items) ? items : [];
   const concurrency = Math.max(1, Number(node.config.concurrency ?? 4));
   const aggregate = (node.config.aggregate as string) ?? "collect";
+  const onError = (node.config.onError as string) ?? "fail";
+
+  // Results are stored by index, so collect order matches input order even
+  // though items settle out of order under a concurrency pool.
+  const results: (MapItemResult | undefined)[] = new Array(list.length);
+  let nextIndex = 0;
+  let paused: StepOutcome | undefined;
+  let failure: Error | undefined;
+
+  // A rolling worker pool: each worker pulls the next index until the list is
+  // drained, so a slow item never blocks the others (unlike fixed chunks).
+  const worker = async (): Promise<void> => {
+    while (nextIndex < list.length && !paused && !failure) {
+      const i = nextIndex++;
+      // `state` first, then the loop bindings — so the per-item item/index
+      // always win even if the parent flow has channels of the same name.
+      const seed: RunState = { ...state, item: list[i], index: i };
+      const res = await runFlow(body, { ...options, input: seed });
+      if (res.status === "paused") {
+        paused ??= bubble(node, res);
+        return;
+      }
+      if (res.status === "failed") {
+        if (onError === "fail") {
+          failure ??= new Error(`map body failed at index ${i}: ${res.error}`);
+          return;
+        }
+        results[i] = { kind: "error", error: res.error };
+        continue;
+      }
+      results[i] = { kind: "ok", output: res.output, delta: diffState(seed, res.state) };
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, () => worker()));
+
+  if (paused) return paused;
+  if (failure) throw failure;
 
   const collected: unknown[] = [];
   const merged: Record<string, unknown> = {};
-
-  for (let i = 0; i < list.length; i += concurrency) {
-    const chunk = list.slice(i, i + concurrency);
-    const settled = await Promise.all(
-      chunk.map(async (item, j) => {
-        const seed: RunState = { item, index: i + j, ...state };
-        const res = await runFlow(body, { ...options, input: seed });
-        return { res, seed };
-      }),
-    );
-    for (const { res, seed } of settled) {
-      if (res.status === "paused") return bubble(node, res);
-      if (res.status === "failed") {
-        throw new Error(`map body failed: ${res.error}`);
-      }
-      if (aggregate === "merge") {
-        Object.assign(merged, diffState(seed, res.state));
-      } else {
-        collected.push(res.output !== undefined ? res.output : diffState(seed, res.state));
-      }
+  for (let i = 0; i < list.length; i++) {
+    const r = results[i];
+    if (!r) continue;
+    if (r.kind === "error") {
+      // skip drops the item entirely; collect surfaces the failure inline.
+      if (onError === "collect") collected.push({ error: r.error, index: i });
+      continue;
     }
+    if (aggregate === "merge") Object.assign(merged, r.delta);
+    else collected.push(r.output !== undefined ? r.output : r.delta);
   }
 
   const value = aggregate === "merge" ? merged : collected;

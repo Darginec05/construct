@@ -77,7 +77,7 @@ export const salesOutbound = defineFlow("sales-outbound", "Outbound sales resear
     });
 
   const review = compose.human({
-    mode: "approve",
+    mode: "annotate",
     exits: ["approved", "edit", "reject"],
     writeTo: feedback,
   });

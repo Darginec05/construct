@@ -1,4 +1,4 @@
-import { type Condition, type ConditionRule } from "@construct/dsl";
+import { type Condition, type ConditionRule, type SwitchCase } from "@construct/dsl";
 import { truthy } from "./expr.js";
 
 /**
@@ -31,7 +31,30 @@ export function evalCondition(condition: unknown, evaluate: Evaluate): boolean {
   return combinator === "or" ? results.some(Boolean) : results.every(Boolean);
 }
 
-function evalRule(rule: ConditionRule, evaluate: Evaluate): boolean {
+/**
+ * Resolve a Switch node's output handle: the `label` of the first case whose
+ * comparison against the subject `on` holds, else "default". A bare-string case
+ * is back-compat sugar for exact equality on that literal (label == value).
+ */
+export function evalSwitch(
+  on: unknown,
+  cases: readonly (SwitchCase | string)[],
+  evaluate: Evaluate,
+): string {
+  for (const c of cases) {
+    const left = on as ConditionRule["left"];
+    const rule: ConditionRule =
+      typeof c === "string" ? { left, op: "eq", right: c } : { left, op: c.op, right: c.value };
+    if (evalRule(rule, evaluate)) return typeof c === "string" ? c : c.label;
+  }
+  return "default";
+}
+
+/**
+ * Evaluate a single `left op right` comparison. Shared with the Switch node,
+ * which compares its subject `on` against each case with the same operators.
+ */
+export function evalRule(rule: ConditionRule, evaluate: Evaluate): boolean {
   const left = evaluate(rule.left);
   switch (rule.op) {
     case "truthy":

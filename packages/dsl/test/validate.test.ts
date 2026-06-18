@@ -280,6 +280,42 @@ describe("validateFlow — branch conditions", () => {
   });
 });
 
+describe("validateFlow — switch cases", () => {
+  function switchFlow(cases: unknown): Flow {
+    return makeFlow({
+      nodes: [
+        { id: "in", type: "input", config: { schema: { x: "any" } } },
+        { id: "s", type: "switch", config: { on: "$.x", cases } },
+        { id: "out", type: "output", config: { from: "ok" } },
+      ],
+      edges: [{ id: "e0", source: "in", target: "s" }],
+    });
+  }
+
+  it("flags duplicate case labels", () => {
+    const flow = switchFlow([
+      { label: "a", op: "eq", value: "1" },
+      { label: "a", op: "eq", value: "2" },
+    ]);
+    expect(messages(flow).some((m) => m.includes('duplicate switch case "a"'))).toBe(true);
+  });
+
+  it("flags a blank case label", () => {
+    const flow = switchFlow([{ label: "", op: "eq", value: "1" }]);
+    expect(messages(flow).some((m) => m.includes("case labels must be non-empty"))).toBe(true);
+  });
+
+  it("flags the reserved label \"default\"", () => {
+    const flow = switchFlow([{ label: "default", op: "eq", value: "1" }]);
+    expect(messages(flow).some((m) => m.includes('"default" is reserved'))).toBe(true);
+  });
+
+  it("accepts distinct labels and a legacy bare-string case", () => {
+    const flow = switchFlow([{ label: "a", op: "eq", value: "1" }, "b"]);
+    expect(errors(flow)).toEqual([]);
+  });
+});
+
 describe("assertValidFlow", () => {
   it("throws when there are error-level issues", () => {
     const flow = makeFlow({

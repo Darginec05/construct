@@ -205,6 +205,40 @@ export function validateFlow(flow: Flow, opts: ValidateOptions = {}): Validation
       }
     }
 
+    if (node.type === "switch") {
+      const cases = (node.config as Record<string, unknown>).cases;
+      if (Array.isArray(cases)) {
+        // Each case label becomes an output handle; a blank, duplicate, or
+        // "default" label silently collides with another handle or the
+        // synthetic catch-all and breaks edge resolution downstream.
+        const seen = new Set<string>();
+        for (const c of cases) {
+          const label = typeof c === "string" ? c : (c as { label?: unknown }).label;
+          if (typeof label !== "string" || label.trim() === "") {
+            issues.push({
+              level: "error",
+              nodeId: node.id,
+              message: `switch case labels must be non-empty`,
+            });
+          } else if (label === "default") {
+            issues.push({
+              level: "error",
+              nodeId: node.id,
+              message: `switch case label "default" is reserved for the catch-all handle`,
+            });
+          } else if (seen.has(label)) {
+            issues.push({
+              level: "error",
+              nodeId: node.id,
+              message: `duplicate switch case "${label}"`,
+            });
+          } else {
+            seen.add(label);
+          }
+        }
+      }
+    }
+
     if (node.type === "router") {
       const cfg = node.config as Record<string, unknown>;
       // A router with no prompt classifies an empty string — it will pick a
@@ -234,6 +268,47 @@ export function validateFlow(flow: Flow, opts: ValidateOptions = {}): Validation
           nodeId: node.id,
           message: `router routes have no description (${undescribed.join(", ")}) — the model only sees the name to decide`,
         });
+      }
+    }
+
+    if (node.type === "output") {
+      // `from` is the run's result: a single expression, or a named bundle
+      // `{ key: expr }`. An empty source (or empty field) means the run returns
+      // nothing/an empty slot — almost always a mistake.
+      const from = (node.config as Record<string, unknown>).from;
+      if (typeof from === "string") {
+        if (from.trim() === "") {
+          issues.push({
+            level: "warning",
+            nodeId: node.id,
+            message: `output has no source — the run will return nothing`,
+          });
+        }
+      } else if (from && typeof from === "object" && !Array.isArray(from)) {
+        const entries = Object.entries(from as Record<string, unknown>);
+        if (entries.length === 0) {
+          issues.push({
+            level: "warning",
+            nodeId: node.id,
+            message: `output bundle has no fields — the run will return an empty object`,
+          });
+        }
+        for (const [key, expr] of entries) {
+          if (key.trim() === "") {
+            issues.push({
+              level: "error",
+              nodeId: node.id,
+              message: `output bundle has an empty key`,
+            });
+          }
+          if (typeof expr === "string" && expr.trim() === "") {
+            issues.push({
+              level: "warning",
+              nodeId: node.id,
+              message: `output field "${key}" has no source — it will be empty`,
+            });
+          }
+        }
       }
     }
   }
