@@ -124,6 +124,34 @@ describe("config schemas", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("parses a structured branch condition and defaults its combinator", () => {
+    const cfg = getNodeSpec("branch")!.configSchema.parse({
+      condition: { rules: [{ left: "$.count", op: "gt", right: "5" }] },
+    });
+    expect(cfg).toMatchObject({
+      condition: { combinator: "and", rules: [{ left: "$.count", op: "gt", right: "5" }] },
+    });
+  });
+
+  it("accepts a unary branch rule with no right side", () => {
+    const schema = getNodeSpec("branch")!.configSchema;
+    expect(
+      schema.safeParse({ condition: { rules: [{ left: "$.x", op: "empty" }] } }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a branch rule with an unknown operator", () => {
+    const schema = getNodeSpec("branch")!.configSchema;
+    expect(
+      schema.safeParse({ condition: { rules: [{ left: "$.x", op: "approx" }] } }).success,
+    ).toBe(false);
+  });
+
+  it("still accepts a bare-string branch condition (back-compat / raw escape)", () => {
+    const schema = getNodeSpec("branch")!.configSchema;
+    expect(schema.safeParse({ condition: "$.x" }).success).toBe(true);
+  });
 });
 
 describe("resolveNodeOutputs", () => {

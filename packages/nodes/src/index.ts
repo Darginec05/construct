@@ -490,8 +490,24 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
     call && typeof call.arguments.reason === "string" ? call.arguments.reason : "";
   if (reason) ctx.onDelta(reason);
 
-  const chosen = matchClass(picked, choices) ?? (fallback ? ROUTER_FALLBACK : names[0] ?? "out");
-  return { ...patch(ctx.config.writeTo, chosen), handle: chosen };
+  // Canonicalize the model's pick to a real branch. When nothing matches —
+  // a provider that ignored the forced tool and answered with an off-list label —
+  // route to "fallback" if it exists (that branch is exactly for low-confidence
+  // / no-fit input). With no fallback wired, fail loudly rather than silently
+  // dumping every unparseable answer into the first branch.
+  const matched = matchClass(picked, choices);
+  if (matched === undefined && !fallback) {
+    throw new Error(
+      `router node: model did not return a listed route (got "${truncate(picked, 120)}"); ` +
+        `enable the fallback option to route low-confidence inputs to a default branch`,
+    );
+  }
+  const chosen = matched ?? ROUTER_FALLBACK;
+
+  const writes: Record<string, unknown> = {};
+  if (typeof ctx.config.writeTo === "string") writes[ctx.config.writeTo] = chosen;
+  if (typeof ctx.config.reasonTo === "string") writes[ctx.config.reasonTo] = reason;
+  return Object.keys(writes).length > 0 ? { patch: writes, handle: chosen } : { handle: chosen };
 }
 
 /** `tool`: invoke a registered tool with evaluated args. */

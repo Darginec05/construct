@@ -66,9 +66,18 @@ function asDataType(value: unknown): DataType {
   return parsed.success ? parsed.data : "any";
 }
 
-function writeTargetOf(node: FlowNode): string | undefined {
-  const w = (node.config as Record<string, unknown>).writeTo;
-  return typeof w === "string" && w.length > 0 ? w : undefined;
+/**
+ * Variable names a node produces into state. Every node may write `writeTo`; a
+ * router additionally writes its rationale into `reasonTo` when set.
+ */
+function writeTargetsOf(node: FlowNode): string[] {
+  const cfg = node.config as Record<string, unknown>;
+  const out: string[] = [];
+  for (const key of ["writeTo", "reasonTo"] as const) {
+    const v = cfg[key];
+    if (typeof v === "string" && v.length > 0) out.push(v);
+  }
+  return out;
 }
 
 function inputSchemaOf(node: FlowNode): Record<string, unknown> | undefined {
@@ -122,20 +131,25 @@ export function flowVariables(flow: Flow, opts: FlowVariablesOptions = {}): Flow
   for (const node of flow.nodes) {
     const schema = inputSchemaOf(node);
     if (!schema) continue;
-    for (const [field, type] of Object.entries(schema)) {
+    for (const [field, descriptor] of Object.entries(schema)) {
       const v = ensure(field);
       v.source = "input";
       v.availableAtStart = true;
-      if (v.type === "any") v.type = asDataType(type);
+      // A descriptor is either the shorthand `"text"` or `{ type, ... }`.
+      const declared =
+        typeof descriptor === "string"
+          ? descriptor
+          : (descriptor as { type?: unknown } | null)?.type;
+      if (v.type === "any") v.type = asDataType(declared);
     }
   }
 
   // 3. writeTo producers: who writes the slot mid-run (for upstream reachability).
   for (const node of flow.nodes) {
-    const target = writeTargetOf(node);
-    if (!target) continue;
-    const v = ensure(target);
-    if (!v.producers.includes(node.id)) v.producers.push(node.id);
+    for (const target of writeTargetsOf(node)) {
+      const v = ensure(target);
+      if (!v.producers.includes(node.id)) v.producers.push(node.id);
+    }
   }
 
   if (opts.includeLoopBindings) {

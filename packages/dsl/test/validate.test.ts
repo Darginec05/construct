@@ -229,6 +229,57 @@ describe("validateFlow — flow-level warnings", () => {
   });
 });
 
+describe("validateFlow — branch conditions", () => {
+  it("warns when a branch has no conditions", () => {
+    const flow = makeFlow({
+      nodes: [
+        { id: "b", type: "branch", config: { condition: { combinator: "and", rules: [] } } },
+        { id: "out", type: "output", config: { from: "$.x" } },
+      ],
+      edges: [
+        { id: "e1", source: "b", target: "out", sourceHandle: "true" },
+        { id: "e2", source: "b", target: "out", sourceHandle: "false" },
+      ],
+    });
+    expect(messages(flow).some((m) => m.includes("branch has no conditions"))).toBe(true);
+  });
+
+  it("accepts a structured condition without spurious unknown-variable warnings", () => {
+    const flow = makeFlow({
+      nodes: [
+        { id: "in", type: "input", config: { schema: { count: "any" } } },
+        {
+          id: "b",
+          type: "branch",
+          config: { condition: { combinator: "and", rules: [{ left: "$.count", op: "gt", right: "5" }] } },
+        },
+        { id: "out", type: "output", config: { from: "ok" } },
+      ],
+      edges: [
+        { id: "e0", source: "in", target: "b" },
+        { id: "e1", source: "b", target: "out", sourceHandle: "true" },
+        { id: "e2", source: "b", target: "out", sourceHandle: "false" },
+      ],
+    });
+    expect(errors(flow)).toEqual([]);
+    expect(messages(flow).some((m) => m.includes("unknown variable"))).toBe(false);
+    expect(messages(flow).some((m) => m.includes("no conditions"))).toBe(false);
+  });
+
+  it("warns when a branch handle has no outgoing edge", () => {
+    const flow = makeFlow({
+      nodes: [
+        { id: "b", type: "branch", config: { condition: "$.x" } },
+        { id: "out", type: "output", config: { from: "$.x" } },
+      ],
+      edges: [{ id: "e1", source: "b", target: "out", sourceHandle: "true" }],
+    });
+    expect(
+      messages(flow).some((m) => m.includes("dead end") && m.includes("false")),
+    ).toBe(true);
+  });
+});
+
 describe("assertValidFlow", () => {
   it("throws when there are error-level issues", () => {
     const flow = makeFlow({
