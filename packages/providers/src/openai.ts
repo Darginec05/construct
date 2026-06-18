@@ -177,7 +177,12 @@ export function createOpenAIProvider(
     ...(options.baseUrl ? { baseURL: options.baseUrl } : {}),
     timeout: options.timeoutMs ?? 60_000,
     ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
-    ...(options.fetch ? { fetch: options.fetch } : {}),
+    // The SDK's `Fetch` declares `RequestInfo` for its input param, which is wider
+    // than the global `fetch` type under newer @types/node — a structural skew that
+    // only bites consumers on those typings. Bridge it at this single boundary.
+    ...(options.fetch
+      ? { fetch: options.fetch as unknown as NonNullable<ConstructorParameters<typeof OpenAI>[0]>["fetch"] }
+      : {}),
   });
 
   return {
