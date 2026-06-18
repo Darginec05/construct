@@ -11,6 +11,7 @@ import { evaluate, truthy } from "./expr.js";
 import { getExecutor } from "./executors.js";
 import type {
   ExecutorContext,
+  PausePoint,
   RunEvent,
   RunOptions,
   RunResult,
@@ -22,7 +23,7 @@ interface StepOutcome {
   handle?: string;
   output?: unknown;
   /** Set when the node (or a nested flow) pauses for a human. */
-  pause?: { nodeId: string; exits: string[] };
+  pause?: PausePoint;
 }
 
 type Emit = (event: RunEvent) => void;
@@ -70,18 +71,34 @@ export async function runFlow(
     }
   }
 
-  // Start at input nodes; fall back to roots (in-degree 0) when there are none.
-  const inputs = parsed.nodes
-    .filter((n) => n.type === "input")
-    .map((n) => n.id);
-  const queue: string[] =
-    inputs.length > 0
-      ? [...inputs]
-      : parsed.nodes
-          .filter((n) => (inDegree.get(n.id) ?? 0) === 0)
-          .map((n) => n.id);
+  const queue: string[] = [];
 
   emit({ type: "run-start", data: { flowId: parsed.id } });
+
+  // Resume path: don't re-run the paused human node. Apply its captured patch and
+  // seed the frontier with the out-edges of `resume.handle`, exactly as if the
+  // node had just finished and chosen that handle.
+  if (options.resume) {
+    const { nodeId, handle, patch } = options.resume;
+    if (!nodesById.has(nodeId)) {
+      return fail(parsed.id, state, `resume target "${nodeId}" not found`, emit, nodeId);
+    }
+    if (patch) applyPatch(state, patch, channels);
+    for (const edge of outEdges.get(nodeId) ?? []) {
+      if (edge.sourceHandle && edge.sourceHandle !== handle) continue;
+      enqueue(edge);
+    }
+  } else {
+    // Start at input nodes; fall back to roots (in-degree 0) when there are none.
+    const inputs = parsed.nodes.filter((n) => n.type === "input").map((n) => n.id);
+    const roots =
+      inputs.length > 0
+        ? inputs
+        : parsed.nodes
+            .filter((n) => (inDegree.get(n.id) ?? 0) === 0)
+            .map((n) => n.id);
+    for (const id of roots) queue.push(id);
+  }
 
   let runOutput: unknown;
   let steps = 0;
@@ -217,8 +234,15 @@ async function stepNode(
         const decision = await options.onHuman(node, ctx);
         return { patch: decision.patch, handle: decision.handle };
       }
+      const cfg = node.config as Record<string, unknown>;
       return {
-        pause: { nodeId: node.id, exits: resolveNodeOutputs(node.type, node.config) },
+        pause: {
+          nodeId: node.id,
+          exits: resolveNodeOutputs(node.type, node.config),
+          mode: typeof cfg.mode === "string" ? cfg.mode : undefined,
+          prompt: typeof cfg.prompt === "string" ? cfg.prompt : undefined,
+          writeTo: typeof cfg.writeTo === "string" ? cfg.writeTo : undefined,
+        },
       };
     }
     default: {
@@ -259,6 +283,9 @@ function bubble(node: FlowNode, child: RunResult): StepOutcome {
     pause: {
       nodeId: `${node.id}/${child.pause?.nodeId ?? "?"}`,
       exits: child.pause?.exits ?? [],
+      mode: child.pause?.mode,
+      prompt: child.pause?.prompt,
+      writeTo: child.pause?.writeTo,
     },
   };
 }

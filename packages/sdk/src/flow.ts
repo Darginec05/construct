@@ -33,6 +33,12 @@ interface FlowAssets {
 /** Options forwarded to the engine; `input` and `flows` are supplied by `run`. */
 export type RunOpts = Omit<RunOptions, "input" | "flows">;
 
+/** A flow document paired with the id of the flow that references it (`null` for an entry flow). */
+export type CollectedFlow = {
+  flow: Flow;
+  parent: string | null;
+};
+
 /**
  * A built flow. `toJSON()` produces the canonical {@link Flow} document — the
  * same shape the visual editor stores, so a builder-authored flow round-trips to
@@ -76,6 +82,29 @@ export class FlowDefinition implements FlowRef {
   assertValid(): this {
     assertValidFlow(this.toJSON());
     return this;
+  }
+
+  /**
+   * Flatten this flow plus every transitively referenced subflow into documents,
+   * each paired with the id of the flow that references it (`null` for this entry
+   * flow). Entry comes first; each subflow appears once, under its first-seen
+   * parent. Lets callers persist a builder's whole flow tree with parent links.
+   */
+  collect(): CollectedFlow[] {
+    const out: CollectedFlow[] = [];
+    const seen = new Set<string>();
+
+    const visit = (def: FlowRef, parent: string | null): void => {
+      if (seen.has(def.id)) return;
+      seen.add(def.id);
+      out.push({ flow: def.toJSON(), parent });
+      if (def instanceof FlowDefinition) {
+        for (const sub of def.assets.subflows) visit(sub, def.id);
+      }
+    };
+    visit(this, null);
+
+    return out;
   }
 
   /** Collect this flow plus every (transitively) referenced subflow and its assets. */

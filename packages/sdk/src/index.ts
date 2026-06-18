@@ -6,7 +6,7 @@
  * — the graph stays the orchestration source of truth.
  */
 export { defineFlow, defineNode, FlowDefinition } from "./flow.js";
-export type { RunOpts, NodeSpec } from "./flow.js";
+export type { RunOpts, NodeSpec, CollectedFlow } from "./flow.js";
 export { FlowBuilder, NodeHandle, PendingEdge } from "./builder.js";
 export type {
   AgentOpts,

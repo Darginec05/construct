@@ -114,6 +114,17 @@ export interface RunOptions {
   onToolApproval?: (
     req: ToolApprovalRequest,
   ) => ToolApprovalDecision | Promise<ToolApprovalDecision>;
+  /**
+   * Resume a previously paused run at a top-level human node. The paused node is
+   * NOT re-executed: the scheduler instead follows the chosen `handle` out of it,
+   * after applying `patch` to the seeded state (e.g. the human's captured reply).
+   * Pair with `initialState` carrying the paused channel snapshot.
+   *
+   * Only top-level human pauses are resumable. A nested pause (its `nodeId`
+   * contains "/") cannot be resumed this way because the scheduler frontier inside
+   * the loop / map / subflow was not preserved when it bubbled up.
+   */
+  resume?: { nodeId: string; handle: string; patch?: Record<string, unknown> };
   /** Global guard against runaway cycles. Default 1000. */
   maxSteps?: number;
   /** Run assertValidFlow before executing. Default true. */
@@ -129,6 +140,20 @@ export interface RunOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Describes a human node the run is waiting on. `nodeId` is prefixed with each
+ * enclosing node's id for a nested pause (e.g. "map1/review"); `exits` are the
+ * handles the human may follow. `mode`, `prompt`, and `writeTo` mirror the human
+ * node's config so a host can render the prompt and route the captured reply.
+ */
+export interface PausePoint {
+  nodeId: string;
+  exits: string[];
+  mode?: string;
+  prompt?: string;
+  writeTo?: string;
+}
+
 export interface RunResult {
   flowId: string;
   status: RunStatus;
@@ -136,7 +161,7 @@ export interface RunResult {
   /** Value produced by the (last) output node. */
   output?: unknown;
   /** Set when status is "paused". */
-  pause?: { nodeId: string; exits: string[] };
+  pause?: PausePoint;
   error?: string;
 }
 
