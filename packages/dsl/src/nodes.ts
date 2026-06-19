@@ -235,10 +235,24 @@ const BranchConfig = z.object({
   condition: z.union([ConditionSchema, ExprSchema]),
 });
 
-/** Multi-way split. Output handles: the cases plus "default". */
+/**
+ * One arm of a Switch: route to `label` (the output handle) when the subject
+ * `on` satisfies `op` against `value`. Reuses the Branch comparators, so the
+ * same operator vocabulary drives both nodes. `value` is omitted for unary ops.
+ */
+export const SwitchCaseSchema = z.object({
+  label: z.string().min(1),
+  op: ComparatorSchema,
+  value: ExprSchema.optional(),
+});
+export type SwitchCase = z.infer<typeof SwitchCaseSchema>;
+
+/** Multi-way split. Output handles: each case `label` plus "default". */
 const SwitchConfig = z.object({
   on: ExprSchema,
-  cases: z.array(z.string()).min(1),
+  // A bare string case is back-compat sugar for exact equality on that literal
+  // (label == value); the engine lifts it into `{ label: s, op: "eq", value: s }`.
+  cases: z.array(z.union([SwitchCaseSchema, z.string()])).min(1),
 });
 
 /**
@@ -258,6 +272,9 @@ const LoopConfig = z.object({
 /**
  * Fan-out over a collection. `aggregate: "merge"` combines partial results of
  * one artifact; `"collect"` gathers competing candidates (variant fan-out).
+ * `onError` sets the per-item failure policy: `"fail"` aborts the whole map on
+ * the first error, `"skip"` drops failed items, `"collect"` keeps them as
+ * `{ error, index }` entries (collect mode only).
  */
 const MapConfig = z.object({
   over: ExprSchema,
@@ -265,6 +282,7 @@ const MapConfig = z.object({
   body: z.string(),
   concurrency: z.number().int().positive().default(4),
   aggregate: z.enum(["merge", "collect"]).default("collect"),
+  onError: z.enum(["fail", "skip", "collect"]).default("fail"),
   writeTo: z.string().optional(),
 });
 
@@ -519,7 +537,10 @@ export function resolveNodeOutputs(type: string, config: unknown): string[] {
     return handles;
   }
   if (type === "switch" && Array.isArray(cfg.cases)) {
-    return [...(cfg.cases as string[]), "default"];
+    const labels = (cfg.cases as unknown[]).map((c) =>
+      typeof c === "string" ? c : String((c as { label?: unknown }).label ?? ""),
+    );
+    return [...labels, "default"];
   }
   if (type === "human") {
     if (Array.isArray(cfg.exits) && cfg.exits.length > 0) {

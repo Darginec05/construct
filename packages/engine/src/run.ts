@@ -5,9 +5,10 @@ import {
   type Flow,
   type FlowEdge,
   type FlowNode,
+  type SwitchCase,
 } from "@construct/dsl";
 import { applyPatch, channelMap, initState } from "./channels.js";
-import { evalCondition } from "./condition.js";
+import { evalCondition, evalSwitch } from "./condition.js";
 import { evaluate, truthy } from "./expr.js";
 import { getExecutor } from "./executors.js";
 import type {
@@ -265,9 +266,8 @@ function resolveHandle(
     return evalCondition(node.config.condition, (e) => ctx.evaluate(e)) ? "true" : "false";
   }
   if (node.type === "switch") {
-    const on = String(ctx.evaluate(node.config.on));
-    const cases = (node.config.cases as string[]) ?? [];
-    return cases.includes(on) ? on : "default";
+    const cases = (node.config.cases as (SwitchCase | string)[]) ?? [];
+    return evalSwitch(node.config.on, cases, (e) => ctx.evaluate(e));
   }
   return outcome.handle ?? "out";
 }
@@ -321,6 +321,11 @@ async function runLoop(
   return {};
 }
 
+/** Per-item outcome, indexed by position so aggregation order is stable. */
+type MapItemResult =
+  | { kind: "ok"; output: unknown; delta: Record<string, unknown> }
+  | { kind: "error"; error: string | undefined };
+
 async function runMap(
   node: FlowNode,
   ctx: ExecutorContext,
@@ -332,30 +337,57 @@ async function runMap(
   const list = Array.isArray(items) ? items : [];
   const concurrency = Math.max(1, Number(node.config.concurrency ?? 4));
   const aggregate = (node.config.aggregate as string) ?? "collect";
+  const onError = (node.config.onError as string) ?? "fail";
+
+  // Results are stored by index, so collect order matches input order even
+  // though items settle out of order under a concurrency pool.
+  const results: (MapItemResult | undefined)[] = new Array(list.length);
+  let nextIndex = 0;
+  let paused: StepOutcome | undefined;
+  let failure: Error | undefined;
+
+  // A rolling worker pool: each worker pulls the next index until the list is
+  // drained, so a slow item never blocks the others (unlike fixed chunks).
+  const worker = async (): Promise<void> => {
+    while (nextIndex < list.length && !paused && !failure) {
+      const i = nextIndex++;
+      // `state` first, then the loop bindings — so the per-item item/index
+      // always win even if the parent flow has channels of the same name.
+      const seed: RunState = { ...state, item: list[i], index: i };
+      const res = await runFlow(body, { ...options, input: seed });
+      if (res.status === "paused") {
+        paused ??= bubble(node, res);
+        return;
+      }
+      if (res.status === "failed") {
+        if (onError === "fail") {
+          failure ??= new Error(`map body failed at index ${i}: ${res.error}`);
+          return;
+        }
+        results[i] = { kind: "error", error: res.error };
+        continue;
+      }
+      results[i] = { kind: "ok", output: res.output, delta: diffState(seed, res.state) };
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, () => worker()));
+
+  if (paused) return paused;
+  if (failure) throw failure;
 
   const collected: unknown[] = [];
   const merged: Record<string, unknown> = {};
-
-  for (let i = 0; i < list.length; i += concurrency) {
-    const chunk = list.slice(i, i + concurrency);
-    const settled = await Promise.all(
-      chunk.map(async (item, j) => {
-        const seed: RunState = { item, index: i + j, ...state };
-        const res = await runFlow(body, { ...options, input: seed });
-        return { res, seed };
-      }),
-    );
-    for (const { res, seed } of settled) {
-      if (res.status === "paused") return bubble(node, res);
-      if (res.status === "failed") {
-        throw new Error(`map body failed: ${res.error}`);
-      }
-      if (aggregate === "merge") {
-        Object.assign(merged, diffState(seed, res.state));
-      } else {
-        collected.push(res.output !== undefined ? res.output : diffState(seed, res.state));
-      }
+  for (let i = 0; i < list.length; i++) {
+    const r = results[i];
+    if (!r) continue;
+    if (r.kind === "error") {
+      // skip drops the item entirely; collect surfaces the failure inline.
+      if (onError === "collect") collected.push({ error: r.error, index: i });
+      continue;
     }
+    if (aggregate === "merge") Object.assign(merged, r.delta);
+    else collected.push(r.output !== undefined ? r.output : r.delta);
   }
 
   const value = aggregate === "merge" ? merged : collected;

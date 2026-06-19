@@ -152,6 +152,27 @@ describe("config schemas", () => {
     const schema = getNodeSpec("branch")!.configSchema;
     expect(schema.safeParse({ condition: "$.x" }).success).toBe(true);
   });
+
+  it("parses a structured switch case with an operator", () => {
+    const cfg = getNodeSpec("switch")!.configSchema.parse({
+      on: "$.score",
+      cases: [{ label: "high", op: "gte", value: "80" }],
+    });
+    expect(cfg).toMatchObject({
+      on: "$.score",
+      cases: [{ label: "high", op: "gte", value: "80" }],
+    });
+  });
+
+  it("still accepts legacy bare-string switch cases", () => {
+    const schema = getNodeSpec("switch")!.configSchema;
+    expect(schema.safeParse({ on: "$.x", cases: ["a", "b"] }).success).toBe(true);
+  });
+
+  it("rejects a switch case with a blank label", () => {
+    const schema = getNodeSpec("switch")!.configSchema;
+    expect(schema.safeParse({ on: "$.x", cases: [{ label: "", op: "eq", value: "1" }] }).success).toBe(false);
+  });
 });
 
 describe("resolveNodeOutputs", () => {
@@ -184,6 +205,14 @@ describe("resolveNodeOutputs", () => {
       "b",
       "default",
     ]);
+  });
+
+  it("derives switch handles from structured case labels", () => {
+    expect(
+      resolveNodeOutputs("switch", {
+        cases: [{ label: "high", op: "gte", value: "80" }, "low"],
+      }),
+    ).toEqual(["high", "low", "default"]);
   });
 
   it("derives human handles from mode", () => {
