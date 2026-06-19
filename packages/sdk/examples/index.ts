@@ -10,3 +10,4 @@ export { incidentResponse } from "./incident-response.js";
 export { salesOutbound } from "./sales-outbound.js";
 export { codeReview } from "./code-review.js";
 export { supervisor } from "./supervisor.js";
+export { contentStudio } from "./content-studio.js";
