@@ -8,31 +8,24 @@ import { isMain, printFlowReport } from "./_util.js";
  * job in the visual DSL:
  *
  *   input(sources, product)
- *     → map(per source → extract-source subflow)  — ground uploads into a corpus
- *     → analysis (agent)                          — distil the shared brief
- *     → core (agent)                              — title / positioning
+ *     → resolve_sources (grounding tool)        — extract uploads into a corpus
+ *     → analysis (agent)                         — distil the shared brief
+ *     → core (agent)                             — title / positioning
  *     → FAN-OUT (parallel, joined "all"):
  *          A. page-list (agent) → map(per page → page-content subflow)
  *          B. landing (agent)
  *          C. pricing (agent)
- *          D. cover image (generate_image tool)
+ *          D. cover image (tool)
  *     → join(all) → output(core, pages, landing, pricing, cover)
  *
  * Per-step model tuning mirrors the source pipeline: a cheap/fast model on the
  * mechanical steps, the strong model on the substance-carrying ones (landing +
  * per-page content), with thinking budget passed through `params`.
  *
- * Faithful to the original topology. Per-item partial failure is preserved with
- * `onError: "collect"` on both `map`s — like the original, a page (or source)
- * that fails does not abort the run; its failure is collected inline as
- * `{ error, index }` next to the successful items. The original grounded several
- * source types (PDF/DOCX via parsers, images, links) with provider fallback;
- * this port simplifies that to `extract_document` over the uploaded documents.
- * Two behaviors the original relied on are still NOT first-class in the engine:
- * per-node retry/backoff, and idempotent step caching for cheap re-runs. The
- * original also treated the cover image as non-fatal; here it sits under
- * `join("all")`, so a cover failure would fail the run — the engine has no
- * per-branch error isolation yet.
+ * Faithful to the original topology. Three behaviors the original relied on are
+ * NOT yet first-class in the engine and are simplified here: per-item partial
+ * failure in `map` (the original collects failed pages and continues), per-node
+ * retry/backoff, and idempotent step caching for cheap re-runs.
  */
 
 const AnalysisSchema = z.object({
@@ -67,38 +60,22 @@ const PricingSchema = z.object({
   tiers: z.array(z.object({ name: z.string(), price: z.string() })),
 });
 
-const SourceTextSchema = z.object({ text: z.string(), format: z.string() });
-
-/** Pull the plain text out of one uploaded PDF/DOCX in the run's workspace. */
-const extractDocument = defineTool({
-  name: "extract_document",
-  description: "Extract the plain text from a PDF or DOCX file in the run's workspace.",
-  tier: "content",
-  input: z.object({ path: z.string() }),
-  run: () => ({ text: "", format: "pdf" }),
+/** Resolve uploaded sources (files/links) into a single grounded text corpus. */
+const resolveSources = defineTool({
+  name: "resolve_sources",
+  description: "Extract uploaded files and links into a grounded text corpus.",
+  tier: "read",
+  input: z.object({ sources: z.array(z.unknown()) }),
+  run: () => ({ corpus: "" }),
 });
 
-/** Generate the product cover image from a text prompt. */
-const generateImage = defineTool({
-  name: "generate_image",
-  description: "Generate an image from a text prompt and save it into the run's workspace.",
+/** Generate the product cover image from its title. */
+const generateCover = defineTool({
+  name: "generate_cover",
+  description: "Generate a cover image for the product.",
   tier: "content",
-  input: z.object({ prompt: z.string(), path: z.string().optional() }),
-  run: () => ({ path: "cover.png" }),
-});
-
-/**
- * Per-source body run once per upload by the grounding `map`. `map` seeds each
- * source path as the `item` channel; the body extracts that one document into
- * text, and the map collects every result into the shared corpus.
- */
-const extractSource = defineFlow("extract-source", "Extract one source document", (f) => {
-  const item = f.text("item");
-  const text = f.json("text", SourceTextSchema);
-
-  f.input({ schema: { item } })
-    .tool(extractDocument, { args: { path: item }, writeTo: text })
-    .to(f.output(text));
+  input: z.object({ title: z.string() }),
+  run: () => ({ url: "https://example.com/cover.png" }),
 });
 
 /**
@@ -122,9 +99,9 @@ const pageContent = defineFlow("page-content", "Write one page", (f) => {
 });
 
 export const contentStudio = defineFlow("content-studio", "Content studio pipeline", (f) => {
-  const sources = f.json("sources", z.array(z.string()), { reducer: "append" });
+  const sources = f.file("sources", { reducer: "append" });
   const product = f.json("product");
-  const corpus = f.json("corpus", { reducer: "append" });
+  const corpus = f.json("corpus");
   const analysis = f.json("analysis", AnalysisSchema);
   const core = f.json("core", CoreSchema);
   const pageList = f.json("pageList", PageListSchema);
@@ -136,14 +113,7 @@ export const contentStudio = defineFlow("content-studio", "Content studio pipeli
   // Ground the uploads, then build the shared brief and product core.
   const coreNode = f
     .input({ schema: { sources, product } })
-    .map({
-      over: sources,
-      body: extractSource,
-      concurrency: 4,
-      aggregate: "collect",
-      onError: "collect",
-      writeTo: corpus,
-    })
+    .tool(resolveSources, { args: { sources }, writeTo: corpus })
     .agent({
       model: gemini("gemini-2.5-flash", { temperature: 0.3, params: { thinkingBudget: 8_192 } }),
       output: AnalysisSchema,
@@ -170,7 +140,6 @@ export const contentStudio = defineFlow("content-studio", "Content studio pipeli
       body: pageContent,
       concurrency: 4,
       aggregate: "collect",
-      onError: "collect",
       writeTo: pages,
     });
 
@@ -188,8 +157,8 @@ export const contentStudio = defineFlow("content-studio", "Content studio pipeli
     writeTo: pricing,
   });
 
-  const coverNode = coreNode.tool(generateImage, {
-    args: { prompt: core.path("title") },
+  const coverNode = coreNode.tool(generateCover, {
+    args: { title: core.path("title") },
     writeTo: cover,
   });
 
