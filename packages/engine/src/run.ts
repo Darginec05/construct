@@ -303,7 +303,7 @@ async function runLoop(
 
   let last: RunResult | undefined;
   for (let i = 0; i < max; i++) {
-    const res = await runFlow(body, { ...options, input: { ...state } });
+    const res = await runFlow(body, { ...options, input: { ...state, index: i } });
     if (res.status === "paused") return bubble(node, res);
     if (res.status === "failed") {
       throw new Error(`loop body failed: ${res.error}`);
@@ -334,7 +334,7 @@ async function runMap(
 ): Promise<StepOutcome> {
   const body = resolveBody(node.config.body, options);
   const items = ctx.evaluate(node.config.over);
-  const list = Array.isArray(items) ? items : [];
+  const list: unknown[] = Array.isArray(items) ? items : [];
   const concurrency = Math.max(1, Number(node.config.concurrency ?? 4));
   const aggregate = (node.config.aggregate as string) ?? "collect";
   const onError = (node.config.onError as string) ?? "fail";
@@ -373,8 +373,10 @@ async function runMap(
 
   await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, () => worker()));
 
-  if (paused) return paused;
+  // A hard failure (onError "fail") wins over a pause: the run is aborting, so
+  // surface the error rather than suspending on another item's human gate.
   if (failure) throw failure;
+  if (paused) return paused;
 
   const collected: unknown[] = [];
   const merged: Record<string, unknown> = {};

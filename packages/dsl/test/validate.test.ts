@@ -209,6 +209,32 @@ describe("validateFlow — config & references", () => {
     ).toBe(true);
   });
 
+  it("flags a quorum count that exceeds the incoming branches", () => {
+    const flow = makeFlow({
+      nodes: [
+        { id: "a", type: "input", config: {} },
+        { id: "j", type: "join", config: { mode: "quorum", count: 3 } },
+      ],
+      edges: [{ id: "e", source: "a", target: "j" }],
+    });
+    expect(messages(flow).some((m) => m.includes("can never fire"))).toBe(true);
+  });
+
+  it("accepts a quorum count within the incoming branches", () => {
+    const flow = makeFlow({
+      nodes: [
+        { id: "a", type: "input", config: {} },
+        { id: "b", type: "input", config: {} },
+        { id: "j", type: "join", config: { mode: "quorum", count: 2 } },
+      ],
+      edges: [
+        { id: "e1", source: "a", target: "j" },
+        { id: "e2", source: "b", target: "j" },
+      ],
+    });
+    expect(messages(flow).some((m) => m.includes("can never fire"))).toBe(false);
+  });
+
   it("warns on an unknown (plugin) node type", () => {
     const flow = makeFlow({
       nodes: [{ id: "p", type: "my-plugin", config: {} }],
@@ -313,6 +339,32 @@ describe("validateFlow — switch cases", () => {
   it("accepts distinct labels and a legacy bare-string case", () => {
     const flow = switchFlow([{ label: "a", op: "eq", value: "1" }, "b"]);
     expect(errors(flow)).toEqual([]);
+  });
+});
+
+describe("validateFlow — map onError/aggregate", () => {
+  function mapFlow(config: Record<string, unknown>): Flow {
+    return makeFlow({
+      nodes: [
+        { id: "in", type: "input", config: { schema: { xs: "any" } } },
+        { id: "m", type: "map", config: { over: "$.xs", body: "b", ...config } },
+        { id: "out", type: "output", config: { from: "ok" } },
+      ],
+      edges: [{ id: "e0", source: "in", target: "m" }],
+    });
+  }
+
+  it("rejects onError \"collect\" paired with aggregate \"merge\"", () => {
+    const flow = mapFlow({ onError: "collect", aggregate: "merge" });
+    expect(errors(flow).some((i) => i.message.includes('onError "collect" needs aggregate "collect"'))).toBe(true);
+  });
+
+  it("accepts onError \"collect\" with aggregate \"collect\"", () => {
+    expect(errors(mapFlow({ onError: "collect", aggregate: "collect" }))).toEqual([]);
+  });
+
+  it("accepts onError \"skip\" with aggregate \"merge\"", () => {
+    expect(errors(mapFlow({ onError: "skip", aggregate: "merge" }))).toEqual([]);
   });
 });
 

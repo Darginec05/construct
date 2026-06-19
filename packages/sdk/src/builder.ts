@@ -100,6 +100,7 @@ export interface MapOpts extends NodeId {
   body: Body;
   concurrency?: number;
   aggregate?: "merge" | "collect";
+  onError?: "fail" | "skip" | "collect";
   writeTo?: ChannelHandle | string;
 }
 
@@ -260,6 +261,7 @@ abstract class Connector {
       body: this.b.useBody(opts.body),
       concurrency: opts.concurrency,
       aggregate: opts.aggregate,
+      onError: opts.onError,
       writeTo: toChannel(opts.writeTo),
     }));
   }

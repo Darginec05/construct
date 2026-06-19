@@ -1,4 +1,5 @@
 import { codeReview } from "./code-review.js";
+import { contentStudio } from "./content-studio.js";
 import { documentIntake } from "./document-intake.js";
 import { incidentResponse } from "./incident-response.js";
 import { salesOutbound } from "./sales-outbound.js";
@@ -13,6 +14,7 @@ const FLOWS: FlowReport[] = [
   salesOutbound,
   codeReview,
   supervisor,
+  contentStudio,
 ];
 
 let failed = false;
