@@ -176,13 +176,20 @@ describe("flowVariables — loop bindings", () => {
     expect(names.has("index")).toBe(false);
   });
 
-  it("includes item/index when asked (loop/map body)", () => {
-    const names = flowVariableNames(makeFlow(), { includeLoopBindings: true });
+  it("includes item + index for a map body", () => {
+    const names = flowVariableNames(makeFlow(), { bodyKind: "map" });
     expect(names.has("item")).toBe(true);
     expect(names.has("index")).toBe(true);
   });
 
+  it("includes index only for a loop body", () => {
+    const names = flowVariableNames(makeFlow(), { bodyKind: "loop" });
+    expect(names.has("item")).toBe(false);
+    expect(names.has("index")).toBe(true);
+  });
+
   it("loopBodyVariables are seeded at start", () => {
-    expect(loopBodyVariables().every((v) => v.availableAtStart)).toBe(true);
+    expect(loopBodyVariables("map").every((v) => v.availableAtStart)).toBe(true);
+    expect(loopBodyVariables("loop").every((v) => v.availableAtStart)).toBe(true);
   });
 });

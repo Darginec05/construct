@@ -123,12 +123,25 @@ export function validateFlow(flow: Flow, opts: ValidateOptions = {}): Validation
 
     if (node.type === "join") {
       const cfg = node.config as Record<string, unknown>;
-      if (cfg.mode === "quorum" && typeof cfg.count !== "number") {
-        issues.push({
-          level: "error",
-          nodeId: node.id,
-          message: `quorum join requires a numeric "count"`,
-        });
+      if (cfg.mode === "quorum") {
+        const incoming = flow.edges.filter((e) => e.target === node.id).length;
+        if (typeof cfg.count !== "number") {
+          issues.push({
+            level: "error",
+            nodeId: node.id,
+            message: `quorum join requires a numeric "count"`,
+          });
+        } else if (cfg.count > incoming) {
+          // The barrier fires at `count` arrivals; if `count` exceeds the
+          // branches wired in, it can never be reached and the run stalls.
+          issues.push({
+            level: "error",
+            nodeId: node.id,
+            message: `quorum count ${cfg.count} exceeds the ${incoming} incoming branch${
+              incoming === 1 ? "" : "es"
+            } — the join can never fire`,
+          });
+        }
       }
     }
 
@@ -239,6 +252,21 @@ export function validateFlow(flow: Flow, opts: ValidateOptions = {}): Validation
       }
     }
 
+    if (node.type === "map") {
+      const cfg = node.config as Record<string, unknown>;
+      // `collect` surfaces failures as `{ error, index }` array entries, which
+      // only exist in the collect aggregation. Under `merge` the result is a
+      // record and those entries are dropped, so the policy would silently
+      // behave like `skip` — reject the pairing instead of losing errors.
+      if (cfg.onError === "collect" && cfg.aggregate === "merge") {
+        issues.push({
+          level: "error",
+          nodeId: node.id,
+          message: `map onError "collect" needs aggregate "collect"; it has no effect with "merge"`,
+        });
+      }
+    }
+
     if (node.type === "router") {
       const cfg = node.config as Record<string, unknown>;
       // A router with no prompt classifies an empty string — it will pick a
@@ -309,6 +337,20 @@ export function validateFlow(flow: Flow, opts: ValidateOptions = {}): Validation
             });
           }
         }
+      }
+    }
+
+    if (node.type === "loop" || node.type === "map") {
+      // The `body` names the sub-flow run per iteration/item. Without it the
+      // node has nothing to execute. (A dangling reference — a body id that
+      // names no flow — is checked by the editor, which has the flow set.)
+      const body = (node.config as Record<string, unknown>).body;
+      if (typeof body !== "string" || body.trim() === "") {
+        issues.push({
+          level: "error",
+          nodeId: node.id,
+          message: `${node.type} has no body sub-flow to run`,
+        });
       }
     }
   }

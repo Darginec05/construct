@@ -1,6 +1,6 @@
 import { SCHEMA_VERSION, type Flow } from "@construct/dsl";
 import { describe, expect, it } from "vitest";
-import { registerFunction, runFlow } from "../src/index.js";
+import { registerExecutor, registerFunction, runFlow } from "../src/index.js";
 import type { RunState } from "../src/types.js";
 
 /**
@@ -25,7 +25,11 @@ registerFunction("doubleOrThrow", (ctx) => {
   return n * 2;
 });
 
-registerFunction("pickItem", (ctx) => ctx.state.item);
+// Writes a distinct channel per item, so a merge aggregation unions real keys
+// instead of last-wins on one shared channel.
+registerExecutor("tagWrite", (ctx) => ({
+  patch: { [`k${ctx.state.index}`]: ctx.state.item },
+}));
 
 function bodyFlow(id: string, code: Record<string, unknown>, from: unknown): Flow {
   return {
@@ -115,10 +119,23 @@ describe("flow → engine → map", () => {
     ]);
   });
 
-  it("merge folds each item's written channels into one record (last wins)", async () => {
-    const pick = bodyFlow("body-pick", { ref: "pickItem" }, "$.out");
-    const res = await run({ aggregate: "merge", concurrency: 1 }, pick, { list: ["a", "b", "c"] });
-    expect(res.output).toEqual({ out: "c" });
+  it("merge unions each item's written channels into one record", async () => {
+    const tagBody: Flow = {
+      schemaVersion: SCHEMA_VERSION,
+      id: "body-tag",
+      name: "body-tag",
+      channels: [],
+      resources: [],
+      nodes: [
+        { id: "bin", type: "input", config: { schema: { item: "any", index: "any" } } },
+        { id: "btag", type: "tagWrite", config: {} },
+      ],
+      edges: [{ id: "be0", source: "bin", target: "btag" }],
+      config: {},
+      metadata: {},
+    };
+    const res = await run({ aggregate: "merge", concurrency: 4 }, tagBody, { list: ["a", "b", "c"] });
+    expect(res.output).toEqual({ k0: "a", k1: "b", k2: "c" });
   });
 
   it("returns an empty result when `over` is not an array", async () => {

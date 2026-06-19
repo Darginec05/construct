@@ -53,12 +53,18 @@ export interface FlowVariable {
   description?: string;
 }
 
+/**
+ * Which kind of body a flow is used as. A `map` body is seeded with both
+ * `item` and `index`; a `loop` body is seeded with `index` only.
+ */
+export type BodyKind = "loop" | "map";
+
 export interface FlowVariablesOptions {
   /**
-   * Include the `item` / `index` bindings the engine injects into a loop/map
-   * body. Set this when the flow being inspected is used as a `body`.
+   * Include the bindings the engine injects into a loop/map body. Set this to
+   * the body kind when the flow being inspected is used as a `body`.
    */
-  includeLoopBindings?: boolean;
+  bodyKind?: BodyKind;
 }
 
 function asDataType(value: unknown): DataType {
@@ -87,14 +93,19 @@ function inputSchemaOf(node: FlowNode): Record<string, unknown> | undefined {
 }
 
 /**
- * The `item` / `index` bindings the engine seeds into a loop or map body
- * (see the engine's `runMap` / loop executor). Concatenated into a body flow's
- * registry by the editor when it knows the flow is a body.
+ * The bindings the engine seeds into a loop or map body (see the engine's
+ * `runMap` / `runLoop`). A map body gets `item` + `index`; a loop body gets
+ * `index` only. Concatenated into a body flow's registry by the editor when it
+ * knows the flow is a body.
  */
-export function loopBodyVariables(): FlowVariable[] {
+export function loopBodyVariables(kind: BodyKind): FlowVariable[] {
+  const index: FlowVariable = {
+    name: "index", type: "any", reducer: "lastValue", source: "loop", producers: [], availableAtStart: true,
+  };
+  if (kind === "loop") return [index];
   return [
     { name: "item", type: "any", reducer: "lastValue", source: "loop", producers: [], availableAtStart: true },
-    { name: "index", type: "any", reducer: "lastValue", source: "loop", producers: [], availableAtStart: true },
+    index,
   ];
 }
 
@@ -152,8 +163,8 @@ export function flowVariables(flow: Flow, opts: FlowVariablesOptions = {}): Flow
     }
   }
 
-  if (opts.includeLoopBindings) {
-    for (const v of loopBodyVariables()) {
+  if (opts.bodyKind) {
+    for (const v of loopBodyVariables(opts.bodyKind)) {
       if (!byName.has(v.name)) byName.set(v.name, v);
     }
   }
