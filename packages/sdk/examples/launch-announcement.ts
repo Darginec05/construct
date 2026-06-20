@@ -51,14 +51,16 @@ const channelPost = defineFlow("channel-post", "Draft one channel post", (f) => 
   const plan = f.json("plan", PlanSchema);
   const post = f.json("post", PostSchema);
 
-  f.input({ schema: { item } })
+  f.input({ schema: { item }, label: "Channel" })
     .agent({
+      label: "Channel post writer",
+      description: "Write one on-brand post for a single channel.",
       model: anthropic("claude-haiku-4-5"),
       output: PostSchema,
       prompt: f.tpl`Write a short, on-brand ${item} post for this launch plan: ${plan}.`,
       writeTo: post,
     })
-    .to(f.output(post));
+    .to(f.output(post, { label: "Post" }));
 });
 
 export const launchAnnouncement = defineFlow(
@@ -70,9 +72,11 @@ export const launchAnnouncement = defineFlow(
     const posts = f.json("posts", { reducer: "append" });
     const review = f.json("review", ReviewSchema);
 
-    const out = f.output({ plan: plan.$, posts: posts.$, review: review.$ });
+    const out = f.output({ plan: plan.$, posts: posts.$, review: review.$ }, { label: "Campaign" });
 
-    const planned = f.input({ schema: { brief } }).agent({
+    const planned = f.input({ schema: { brief }, label: "Feature brief" }).agent({
+      label: "Campaign planner",
+      description: "Pick the audience, angle, and channels for the launch.",
       model: anthropic("claude-sonnet-4-6"),
       output: PlanSchema,
       prompt: f.tpl`Plan a launch campaign for this feature: ${brief}. Choose the target audience, a positioning angle, and 2-4 social channels to announce on.`,
@@ -81,6 +85,7 @@ export const launchAnnouncement = defineFlow(
 
     const reviewed = planned
       .map({
+        label: "Per-channel posts",
         over: plan.path("channels"),
         body: channelPost,
         concurrency: 3,
@@ -88,18 +93,22 @@ export const launchAnnouncement = defineFlow(
         writeTo: posts,
       })
       .agent({
+        label: "Post reviewer",
+        description: "Score the channel posts and flag weak ones.",
         model: anthropic("claude-sonnet-4-6"),
         output: ReviewSchema,
         prompt: f.tpl`Review these channel posts against the plan ${plan}: ${posts}. Score them 0-100 and flag anything off-brand or weak.`,
         writeTo: review,
       });
 
-    const gate = reviewed.branch({ condition: review.path("pass") });
+    const gate = reviewed.branch({ condition: review.path("pass"), label: "Review gate" });
 
     gate.on("true").to(out);
     gate
       .on("false")
       .agent({
+        label: "Polish posts",
+        description: "Apply the review notes and re-score the posts.",
         model: anthropic("claude-sonnet-4-6"),
         output: ReviewSchema,
         prompt: f.tpl`The posts ${posts} did not pass review. Apply the notes in ${review}, tighten the messaging, and re-score.`,

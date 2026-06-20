@@ -43,6 +43,10 @@ interface GraphState {
 interface NodeId {
   /** Override the auto-generated node id (defaults to `<type>`, `<type>2`, …). */
   id?: string;
+  /** Editor-only display name an author gives the node; ignored by the engine. */
+  label?: string;
+  /** Editor-only note describing the node's role; ignored by the engine. */
+  description?: string;
 }
 
 type Body = FlowRef | string;
@@ -209,7 +213,7 @@ abstract class Connector {
 
   agent(opts: AgentOpts): NodeHandle {
     for (const t of opts.tools ?? []) this.b.useTool(t);
-    return this.b.spawn(this.origin(), "agent", opts.id, clean({
+    return this.b.spawn(this.origin(), "agent", opts, clean({
       model: opts.model,
       system: opts.system,
       prompt: opts.prompt === undefined ? undefined : toExpr(opts.prompt),
@@ -223,7 +227,7 @@ abstract class Connector {
   }
 
   router(opts: RouterOpts): NodeHandle {
-    return this.b.spawn(this.origin(), "router", opts.id, clean({
+    return this.b.spawn(this.origin(), "router", opts, clean({
       model: opts.model,
       prompt: opts.prompt === undefined ? undefined : toExpr(opts.prompt),
       classes: opts.classes,
@@ -233,20 +237,20 @@ abstract class Connector {
   }
 
   branch(opts: BranchOpts): NodeHandle {
-    return this.b.spawn(this.origin(), "branch", opts.id, {
+    return this.b.spawn(this.origin(), "branch", opts, {
       condition: toExpr(opts.condition),
     });
   }
 
   switch(opts: SwitchOpts): NodeHandle {
-    return this.b.spawn(this.origin(), "switch", opts.id, {
+    return this.b.spawn(this.origin(), "switch", opts, {
       on: toExpr(opts.on),
       cases: opts.cases,
     });
   }
 
   loop(opts: LoopOpts): NodeHandle {
-    return this.b.spawn(this.origin(), "loop", opts.id, clean({
+    return this.b.spawn(this.origin(), "loop", opts, clean({
       body: this.b.useBody(opts.body),
       until: opts.until === undefined ? undefined : toExpr(opts.until),
       maxIterations: opts.maxIterations,
@@ -256,7 +260,7 @@ abstract class Connector {
   }
 
   map(opts: MapOpts): NodeHandle {
-    return this.b.spawn(this.origin(), "map", opts.id, clean({
+    return this.b.spawn(this.origin(), "map", opts, clean({
       over: toExpr(opts.over),
       body: this.b.useBody(opts.body),
       concurrency: opts.concurrency,
@@ -268,7 +272,7 @@ abstract class Connector {
 
   code(ref: string | NodeDef, opts: CodeOpts = {}): NodeHandle {
     const refId = isNodeDef(ref) ? this.b.useFunction(ref) : ref;
-    return this.b.spawn(this.origin(), "code", opts.id, clean({
+    return this.b.spawn(this.origin(), "code", opts, clean({
       ref: opts.inline ? undefined : refId,
       inline: opts.inline,
       writeTo: toChannel(opts.writeTo),
@@ -276,7 +280,7 @@ abstract class Connector {
   }
 
   retrieve(opts: RetrieveOpts): NodeHandle {
-    return this.b.spawn(this.origin(), "retrieve", opts.id, clean({
+    return this.b.spawn(this.origin(), "retrieve", opts, clean({
       store: opts.store,
       query: toExpr(opts.query),
       topK: opts.topK,
@@ -285,7 +289,7 @@ abstract class Connector {
   }
 
   transform(opts: TransformOpts): NodeHandle {
-    return this.b.spawn(this.origin(), "transform", opts.id, clean({
+    return this.b.spawn(this.origin(), "transform", opts, clean({
       expr: toExpr(opts.expr),
       writeTo: toChannel(opts.writeTo),
     }));
@@ -293,7 +297,7 @@ abstract class Connector {
 
   tool(impl: Tool, opts: ToolOpts = {}): NodeHandle {
     this.b.useTool(impl);
-    return this.b.spawn(this.origin(), "tool", opts.id, clean({
+    return this.b.spawn(this.origin(), "tool", opts, clean({
       tool: impl.name,
       args: mapArgs(opts.args),
       tier: opts.tier ?? impl.tier,
@@ -304,7 +308,7 @@ abstract class Connector {
   }
 
   human(opts: HumanOpts): NodeHandle {
-    return this.b.spawn(this.origin(), "human", opts.id, clean({
+    return this.b.spawn(this.origin(), "human", opts, clean({
       mode: opts.mode,
       prompt: opts.prompt,
       exits: opts.exits,
@@ -314,7 +318,7 @@ abstract class Connector {
   }
 
   subflow(body: Body, opts: SubflowOpts = {}): NodeHandle {
-    return this.b.spawn(this.origin(), "subflow", opts.id, clean({
+    return this.b.spawn(this.origin(), "subflow", opts, clean({
       flow: this.b.useBody(body),
       inputs: opts.inputs ? mapArgs(opts.inputs) : undefined,
       writeTo: toChannel(opts.writeTo),
@@ -359,12 +363,11 @@ export class PendingEdge extends Connector {
 
 // --- the builder facade -----------------------------------------------------
 
-export interface InputOpts {
+export interface InputOpts extends NodeId {
   /** Declare the entry contract from one channel… */
   channel?: ChannelHandle;
   /** …or several, as a map of field name -> channel handle. */
   schema?: Record<string, ChannelHandle>;
-  id?: string;
 }
 
 type OutputFrom = ChannelHandle | ExprInput | Record<string, ExprInput>;
@@ -456,7 +459,7 @@ export class FlowBuilder {
     for (const [field, ch] of Object.entries(opts.schema ?? {})) {
       schema[field] = ch.type;
     }
-    return this.add("input", { schema }, opts.id);
+    return this.add("input", { schema }, opts);
   }
 
   /** Place a terminal node surfacing `from` as the run result. */
@@ -465,7 +468,7 @@ export class FlowBuilder {
       from instanceof ChannelHandle || typeof from !== "object"
         ? toExpr(from as ExprInput)
         : mapArgs(from as Record<string, ExprInput>);
-    return this.add("output", { from: value }, opts.id);
+    return this.add("output", { from: value }, opts);
   }
 
   /**
@@ -477,7 +480,7 @@ export class FlowBuilder {
     const node = this.add(
       "join",
       clean({ mode: opts.mode, count: opts.count, writeTo: toChannel(opts.writeTo) }),
-      opts.id,
+      opts,
     );
     for (const src of sources) src.to(node);
     return node;
@@ -492,10 +495,10 @@ export class FlowBuilder {
     return n === 1 ? type : `${type}${n}`;
   }
 
-  private add(type: string, config: Record<string, unknown>, id?: string): NodeHandle {
-    let nodeId = id ?? this.nextId(type);
+  private add(type: string, config: Record<string, unknown>, opts: NodeId = {}): NodeHandle {
+    let nodeId = opts.id ?? this.nextId(type);
     if (this.s.usedIds.has(nodeId)) {
-      if (id !== undefined) {
+      if (opts.id !== undefined) {
         throw new Error(`builder: duplicate node id "${nodeId}"`);
       }
       // An auto id collided with an explicit one; advance until a free slot.
@@ -504,7 +507,9 @@ export class FlowBuilder {
       } while (this.s.usedIds.has(nodeId));
     }
     this.s.usedIds.add(nodeId);
-    this.s.nodes.push({ id: nodeId, type, config });
+    this.s.nodes.push(
+      clean({ id: nodeId, type, config, label: opts.label, description: opts.description }) as FlowNode,
+    );
     return new NodeHandle(this, nodeId, type);
   }
 
@@ -512,10 +517,10 @@ export class FlowBuilder {
   spawn(
     origin: { id: string; handle?: string },
     type: string,
-    id: string | undefined,
+    opts: NodeId,
     config: Record<string, unknown>,
   ): NodeHandle {
-    const node = this.add(type, config, id);
+    const node = this.add(type, config, opts);
     this.connect(origin.id, node.id, origin.handle);
     return node;
   }
