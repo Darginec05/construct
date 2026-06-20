@@ -22,7 +22,19 @@ function buildFlow(condition: Condition | string, opts: { wireFalse?: boolean } 
     ],
     resources: [],
     nodes: [
-      { id: "in", type: "input", config: { schema: { count: "any", status: "text", flag: "any" } } },
+      // These fields are optional: each case below drives the branch with a
+      // different subset, so the input contract must not require all three.
+      {
+        id: "in",
+        type: "input",
+        config: {
+          schema: {
+            count: { type: "any", required: false },
+            status: { type: "text", required: false },
+            flag: { type: "any", required: false },
+          },
+        },
+      },
       { id: "b", type: "branch", config: { condition } },
       { id: "hi", type: "output", config: { from: "took true" } },
       ...(wireFalse ? [{ id: "lo", type: "output", config: { from: "took false" } }] : []),

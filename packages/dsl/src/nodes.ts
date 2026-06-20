@@ -62,6 +62,70 @@ const InputConfig = z.object({
   schema: z.record(InputFieldSchema).default({}),
 });
 
+/** A field that failed the input contract, with a dotted path to its location. */
+export interface InputContractError {
+  field: string;
+  message: string;
+}
+
+export interface InputContractResult {
+  /** The payload with defaults filled in for missing optional fields. */
+  value: Record<string, unknown>;
+  errors: InputContractError[];
+}
+
+function normalizeInputFields(
+  schema: Record<string, InputField>,
+  payload: Record<string, unknown>,
+  prefix: string,
+  errors: InputContractError[],
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...payload };
+  for (const [name, field] of Object.entries(schema)) {
+    const path = prefix ? `${prefix}.${name}` : name;
+    const provided = payload[name];
+    if (provided === undefined || provided === null) {
+      if (field.default !== undefined) {
+        out[name] = field.default;
+      } else if (field.required) {
+        errors.push({ field: path, message: "is required but was not provided" });
+      }
+      continue;
+    }
+    // Present: recurse into a nested object contract so its own defaults are
+    // filled and its required fields are checked too.
+    if (field.fields && typeof provided === "object" && !Array.isArray(provided)) {
+      out[name] = normalizeInputFields(
+        field.fields,
+        provided as Record<string, unknown>,
+        path,
+        errors,
+      );
+    }
+  }
+  return out;
+}
+
+/**
+ * Enforce an input node's declared contract against an incoming payload: fill
+ * defaults for missing optional fields and report every missing required field.
+ * Extra payload keys are preserved (the engine seeds them as state). Pure — it
+ * never throws; the caller decides what to do with the collected `errors`.
+ *
+ * The raw schema is normalized first (string shorthand -> descriptor, field
+ * defaults applied), so the engine can pass an input node's unparsed config.
+ */
+export function applyInputContract(
+  schema: Record<string, InputField>,
+  payload: Record<string, unknown>,
+): InputContractResult {
+  const parsed = z.record(InputFieldSchema).safeParse(schema);
+  if (!parsed.success) return { value: { ...payload }, errors: [] };
+  const errors: InputContractError[] = [];
+  const value = normalizeInputFields(parsed.data, payload, "", errors);
+  return { value, errors };
+}
+
 /**
  * Terminal. Surfaces the run result: either a single value, or a named bundle
  * (e.g. { url, zip, spec, changelog }) when a flow returns several artifacts.

@@ -21,6 +21,10 @@ export const NodeSchema = z.object({
   id: z.string(),
   type: z.string(),
   config: z.record(z.unknown()).default({}),
+  /** Editor-only display name an author gives the node; ignored by the engine. */
+  label: z.string().optional(),
+  /** Editor-only note describing the node's role; ignored by the engine. */
+  description: z.string().optional(),
   /** Editor-only; ignored by the engine. */
   position: PositionSchema.optional(),
 });

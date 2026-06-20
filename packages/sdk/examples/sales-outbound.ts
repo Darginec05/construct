@@ -45,12 +45,14 @@ export const salesOutbound = defineFlow("sales-outbound", "Outbound sales resear
   const feedback = f.text("feedback");
   const sent = f.json("sent");
 
-  const out = f.output(sent);
+  const out = f.output(sent, { label: "Sent" });
   const mailbox = f.resource("mailbox", "email", { scope: "session" });
 
   const gather = f
-    .input({ schema: { domain, contactEmail } })
+    .input({ schema: { domain, contactEmail }, label: "Prospect" })
     .agent({
+      label: "Account researcher",
+      description: "Research the prospect via web and CRM lookups.",
       model: anthropic("claude-sonnet-4-6"),
       prompt: f.tpl`Research ${domain} for a personalized outbound pitch`,
       tools: [webSearch, crmSearch],
@@ -58,18 +60,25 @@ export const salesOutbound = defineFlow("sales-outbound", "Outbound sales resear
       writeTo: research,
     })
     .agent({
+      label: "Readiness check",
+      description: "Decide whether there is enough to write the email.",
       model: anthropic("claude-haiku-4-5"),
       output: ReadinessSchema,
       prompt: f.tpl`Do we have enough to write email? ${research}`,
       writeTo: readiness,
     });
 
-  const qualityGate = gather.branch({ condition: readiness.path("ready") });
-  qualityGate.on("false").human({ mode: "collect", prompt: "What is missing?", writeTo: missing }).to(gather);
+  const qualityGate = gather.branch({ condition: readiness.path("ready"), label: "Readiness gate" });
+  qualityGate
+    .on("false")
+    .human({ mode: "collect", prompt: "What is missing?", writeTo: missing, label: "Gather missing info" })
+    .to(gather);
 
   const compose = qualityGate
     .on("true")
     .agent({
+      label: "Email writer",
+      description: "Draft the outbound email from the research.",
       model: anthropic("claude-sonnet-4-6"),
       output: DraftSchema,
       prompt: f.tpl`Write outbound email using ${research} for ${contactEmail}`,
@@ -80,9 +89,12 @@ export const salesOutbound = defineFlow("sales-outbound", "Outbound sales resear
     mode: "annotate",
     exits: ["approved", "edit", "reject"],
     writeTo: feedback,
+    label: "Review draft",
   });
 
   review.on("edit").agent({
+    label: "Apply edits",
+    description: "Revise the draft to address reviewer feedback.",
     model: anthropic("claude-sonnet-4-6"),
     output: DraftSchema,
     prompt: f.tpl`Revise ${draft} per feedback ${feedback}`,
@@ -95,6 +107,7 @@ export const salesOutbound = defineFlow("sales-outbound", "Outbound sales resear
       args: { to: contactEmail, subject: draft.path("subject"), body: draft.path("body") },
       resource: mailbox,
       writeTo: sent,
+      label: "Send email",
     })
     .to(out);
 

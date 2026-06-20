@@ -24,13 +24,15 @@ const stubRunbook = (id: string, name: string) =>
   defineFlow(id, name, (f) => {
     const alert = f.json("alert");
     const notes = f.text("notes");
-    f.input({ schema: { alert } })
+    f.input({ schema: { alert }, label: "Alert" })
       .agent({
+        label: name,
+        description: `Run the ${name.toLowerCase()} steps for the incident.`,
         model: anthropic("claude-haiku-4-5"),
         prompt: f.tpl`${name} for ${alert}`,
         writeTo: notes,
       })
-      .to(f.output(notes));
+      .to(f.output(notes, { label: "Notes" }));
   });
 
 const timelineRunbook = stubRunbook("timeline_runbook", "Timeline runbook");
@@ -60,44 +62,55 @@ export const incidentResponse = defineFlow("incident-response", "Incident respon
   const pageResult = f.json("page_result");
 
   const paging = f.resource("pager", "pagerduty", { scope: "session" });
-  const out = f.output(pageResult);
+  const out = f.output(pageResult, { label: "Paging result" });
 
   const triage = f
-    .input({ schema: { alert } })
-    .code(severityScore, { writeTo: severity })
-    .switch({ on: severity.path("label"), cases: ["P0", "P1"] });
+    .input({ schema: { alert }, label: "Incoming alert" })
+    .code(severityScore, { writeTo: severity, label: "Severity score" })
+    .switch({ label: "Severity router", on: severity.path("label"), cases: ["P0", "P1"] });
 
   const p0Barrier = f.join(
     [
-      triage.on("P0").subflow(timelineRunbook, { writeTo: timeline }),
-      triage.on("P0").subflow(blastRunbook, { writeTo: blast }),
-      triage.on("P0").subflow(mitigationRunbook, { writeTo: mitigation }),
-      triage.on("P0").subflow(commsRunbook, { writeTo: comms }),
+      triage.on("P0").subflow(timelineRunbook, { writeTo: timeline, label: "Timeline" }),
+      triage.on("P0").subflow(blastRunbook, { writeTo: blast, label: "Blast radius" }),
+      triage.on("P0").subflow(mitigationRunbook, { writeTo: mitigation, label: "Mitigation" }),
+      triage.on("P0").subflow(commsRunbook, { writeTo: comms, label: "Comms draft" }),
     ],
-    { mode: "quorum", count: 3 },
+    { mode: "quorum", count: 3, label: "P0 runbooks" },
   );
 
   const p1Barrier = f.join(
     [
-      triage.on("P1").subflow(timelineRunbook, { writeTo: timeline }),
-      triage.on("P1").subflow(blastRunbook, { writeTo: blast }),
-      triage.on("P1").subflow(mitigationRunbook, { writeTo: mitigation }),
-      triage.on("P1").subflow(commsRunbook, { writeTo: comms }),
+      triage.on("P1").subflow(timelineRunbook, { writeTo: timeline, label: "Timeline" }),
+      triage.on("P1").subflow(blastRunbook, { writeTo: blast, label: "Blast radius" }),
+      triage.on("P1").subflow(mitigationRunbook, { writeTo: mitigation, label: "Mitigation" }),
+      triage.on("P1").subflow(commsRunbook, { writeTo: comms, label: "Comms draft" }),
     ],
-    { mode: "quorum", count: 3 },
+    { mode: "quorum", count: 3, label: "P1 runbooks" },
   );
 
   const finish = (barrier: NodeHandle): void => {
     barrier
       .agent({
+        label: "Postmortem synthesizer",
+        description: "Write the postmortem from the runbook findings.",
         model: anthropic("claude-sonnet-4-6"),
         output: PostmortemSchema,
         prompt: f.tpl`Synthesize postmortem from ${timeline}, ${blast}, ${mitigation}, ${comms}`,
         writeTo: postmortem,
       })
-      .human({ mode: "approve", exits: ["approved", "needs_more", "false_alarm"] })
+      .human({
+        mode: "approve",
+        exits: ["approved", "needs_more", "false_alarm"],
+        label: "Approve paging",
+      })
       .on("approved")
-      .tool(pageOncall, { args: { summary: postmortem.path("summary") }, resource: paging, writeTo: pageResult })
+      .tool(pageOncall, {
+        args: { summary: postmortem.path("summary") },
+        resource: paging,
+        writeTo: pageResult,
+        label: "Page on-call",
+      })
       .to(out);
   };
 
@@ -106,16 +119,23 @@ export const incidentResponse = defineFlow("incident-response", "Incident respon
 
   triage
     .on("default")
-    .subflow(standardRunbook, { writeTo: standard })
+    .subflow(standardRunbook, { writeTo: standard, label: "Standard runbook" })
     .agent({
+      label: "Standard summarizer",
+      description: "Summarize the standard-severity response.",
       model: anthropic("claude-haiku-4-5"),
       output: PostmortemSchema,
       prompt: f.tpl`Summarize standard response using ${standard}`,
       writeTo: postmortem,
     })
-    .human({ mode: "approve" })
+    .human({ mode: "approve", label: "Approve paging" })
     .on("approved")
-    .tool(pageOncall, { args: { summary: postmortem.path("summary") }, resource: paging, writeTo: pageResult })
+    .tool(pageOncall, {
+      args: { summary: postmortem.path("summary") },
+      resource: paging,
+      writeTo: pageResult,
+      label: "Page on-call",
+    })
     .to(out);
 });
 

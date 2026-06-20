@@ -88,14 +88,16 @@ const pageContent = defineFlow("page-content", "Write one page", (f) => {
   const core = f.json("core", CoreSchema);
   const page = f.json("page", PageContentSchema);
 
-  f.input({ schema: { item } })
+  f.input({ schema: { item }, label: "Chapter spec" })
     .agent({
+      label: "Page writer",
+      description: "Write the full content for one chapter.",
       model: gemini("gemini-2.5-pro", { temperature: 0.65, params: { thinkingBudget: 24_576 } }),
       output: PageContentSchema,
       prompt: f.tpl`Write the full content for the chapter ${item} of the product ${core}.`,
       writeTo: page,
     })
-    .to(f.output(page));
+    .to(f.output(page, { label: "Page" }));
 });
 
 export const contentStudio = defineFlow("content-studio", "Content studio pipeline", (f) => {
@@ -112,15 +114,19 @@ export const contentStudio = defineFlow("content-studio", "Content studio pipeli
 
   // Ground the uploads, then build the shared brief and product core.
   const coreNode = f
-    .input({ schema: { sources, product } })
-    .tool(resolveSources, { args: { sources }, writeTo: corpus })
+    .input({ schema: { sources, product }, label: "Sources + product" })
+    .tool(resolveSources, { args: { sources }, writeTo: corpus, label: "Ground sources" })
     .agent({
+      label: "Brief writer",
+      description: "Distil the sources into a product brief.",
       model: gemini("gemini-2.5-flash", { temperature: 0.3, params: { thinkingBudget: 8_192 } }),
       output: AnalysisSchema,
       prompt: f.tpl`Analyse the source material and write a product brief: ${corpus}`,
       writeTo: analysis,
     })
     .agent({
+      label: "Product core",
+      description: "Name and position the product from the brief.",
       model: gemini("gemini-2.5-flash", { temperature: 0.6, params: { thinkingBudget: 2_048 } }),
       output: CoreSchema,
       prompt: f.tpl`Name and position the product from this brief: ${analysis}`,
@@ -130,12 +136,15 @@ export const contentStudio = defineFlow("content-studio", "Content studio pipeli
   // Fan out from the core: chapters (+ per-page content), landing, pricing, cover.
   const perPage = coreNode
     .agent({
+      label: "Chapter outliner",
+      description: "Outline the product's chapters.",
       model: gemini("gemini-2.5-flash", { temperature: 0.7, params: { thinkingBudget: 8_192 } }),
       output: PageListSchema,
       prompt: f.tpl`Outline the chapters for ${core} using ${corpus}.`,
       writeTo: pageList,
     })
     .map({
+      label: "Per-page content",
       over: pageList.path("pages"),
       body: pageContent,
       concurrency: 4,
@@ -144,6 +153,8 @@ export const contentStudio = defineFlow("content-studio", "Content studio pipeli
     });
 
   const landingNode = coreNode.agent({
+    label: "Landing page",
+    description: "Write the product landing page.",
     model: gemini("gemini-2.5-pro", { temperature: 0.7, params: { thinkingBudget: 16_384 } }),
     output: LandingSchema,
     prompt: f.tpl`Write the landing page for ${core}.`,
@@ -151,6 +162,8 @@ export const contentStudio = defineFlow("content-studio", "Content studio pipeli
   });
 
   const pricingNode = coreNode.agent({
+    label: "Pricing tiers",
+    description: "Propose pricing tiers for the product.",
     model: gemini("gemini-2.5-flash", { temperature: 0.5 }),
     output: PricingSchema,
     prompt: f.tpl`Propose pricing tiers for ${core}.`,
@@ -160,16 +173,20 @@ export const contentStudio = defineFlow("content-studio", "Content studio pipeli
   const coverNode = coreNode.tool(generateCover, {
     args: { title: core.path("title") },
     writeTo: cover,
+    label: "Cover image",
   });
 
-  f.join([perPage, landingNode, pricingNode, coverNode], { mode: "all" }).to(
-    f.output({
-      core: core.$,
-      pages: pages.$,
-      landing: landing.$,
-      pricing: pricing.$,
-      cover: cover.$,
-    }),
+  f.join([perPage, landingNode, pricingNode, coverNode], { mode: "all", label: "Assemble result" }).to(
+    f.output(
+      {
+        core: core.$,
+        pages: pages.$,
+        landing: landing.$,
+        pricing: pricing.$,
+        cover: cover.$,
+      },
+      { label: "Published content" },
+    ),
   );
 });
 

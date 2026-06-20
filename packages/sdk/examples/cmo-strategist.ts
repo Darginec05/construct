@@ -79,24 +79,28 @@ const channelPlan = defineFlow("channel-plan", "Plan one marketing channel", (f)
   const strategy = f.json("strategy", StrategySchema);
   const plan = f.json("plan", ChannelPlanSchema);
 
-  f.input({ schema: { item } })
+  f.input({ schema: { item }, label: "Channel" })
     .agent({
+      label: "Channel planner",
+      description: "Build a concrete campaign plan for one channel.",
       model: anthropic("claude-haiku-4-5"),
       output: ChannelPlanSchema,
       prompt: f.tpl`Build a concrete campaign plan for the ${item} channel, consistent with the overall strategy ${strategy}. Cover the objective, target audience, 3-5 tactics, a posting cadence, and 2-3 sample copy lines.`,
       writeTo: plan,
     })
-    .to(f.output(plan));
+    .to(f.output(plan, { label: "Channel plan" }));
 });
 
 export const cmoStrategist = defineFlow("cmo-strategist", "CMO marketing strategist", (f) => {
   const brief = f.text("brief");
   const strategy = f.json("strategy", StrategySchema);
-  const channelPlans = f.json("channelPlans", { reducer: "append" });
+  const channelPlans = f.json("channelPlans");
   const execBrief = f.json("execBrief", ExecBriefSchema);
 
-  f.input({ schema: { brief } })
+  f.input({ schema: { brief }, label: "Marketing brief" })
     .agent({
+      label: "Strategy agent",
+      description: "Design the GTM strategy and split the budget with the calculator.",
       model: anthropic("claude-sonnet-4-6"),
       tools: [calculator],
       toolChoice: "auto",
@@ -110,6 +114,7 @@ Produce the marketing strategy: positioning, the ideal customer profile, value p
       writeTo: strategy,
     })
     .map({
+      label: "Per-channel plans",
       over: strategy.path("channels"),
       body: channelPlan,
       concurrency: 3,
@@ -117,17 +122,22 @@ Produce the marketing strategy: positioning, the ideal customer profile, value p
       writeTo: channelPlans,
     })
     .agent({
+      label: "Exec brief writer",
+      description: "Synthesize the strategy and channel plans into an exec brief.",
       model: anthropic("claude-sonnet-4-6"),
       output: ExecBriefSchema,
       prompt: f.tpl`Synthesize an executive brief from the strategy ${strategy} and the per-channel plans ${channelPlans}: a headline, a short summary, a prioritized 30-day action list, and the key risks to watch.`,
       writeTo: execBrief,
     })
     .to(
-      f.output({
-        strategy: strategy.$,
-        channelPlans: channelPlans.$,
-        execBrief: execBrief.$,
-      }),
+      f.output(
+        {
+          strategy: strategy.$,
+          channelPlans: channelPlans.$,
+          execBrief: execBrief.$,
+        },
+        { label: "GTM plan" },
+      ),
     );
 });
 
