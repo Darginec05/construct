@@ -69,7 +69,7 @@ export const launchAnnouncement = defineFlow(
   (f) => {
     const brief = f.text("brief");
     const plan = f.json("plan", PlanSchema);
-    const posts = f.json("posts", { reducer: "append" });
+    const posts = f.json("posts");
     const review = f.json("review", ReviewSchema);
 
     const out = f.output({ plan: plan.$, posts: posts.$, review: review.$ }, { label: "Campaign" });

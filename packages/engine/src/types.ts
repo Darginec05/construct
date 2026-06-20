@@ -125,6 +125,13 @@ export interface RunOptions {
    * the loop / map / subflow was not preserved when it bubbled up.
    */
   resume?: { nodeId: string; handle: string; patch?: Record<string, unknown> };
+  /**
+   * Enforce the input node's declared contract on `input`: fill field defaults
+   * and fail the run when a required field is missing. Default true. The engine
+   * sets it false for nested loop / map / subflow bodies, whose input is seeded
+   * from the parent run state rather than an external caller.
+   */
+  enforceInput?: boolean;
   /** Global guard against runaway cycles. Default 1000. */
   maxSteps?: number;
   /** Run assertValidFlow before executing. Default true. */

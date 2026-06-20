@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyInputContract,
   BUILTIN_NODE_TYPES,
   getNodeSpec,
+  type InputField,
   listNodeSpecs,
   registerNodeSpec,
   resolveNodeOutputs,
@@ -172,6 +174,82 @@ describe("config schemas", () => {
   it("rejects a switch case with a blank label", () => {
     const schema = getNodeSpec("switch")!.configSchema;
     expect(schema.safeParse({ on: "$.x", cases: [{ label: "", op: "eq", value: "1" }] }).success).toBe(false);
+  });
+});
+
+describe("applyInputContract", () => {
+  const field = (f: Partial<InputField>): InputField => ({
+    type: "any",
+    required: true,
+    ...f,
+  });
+
+  it("reports a missing required field", () => {
+    const { errors } = applyInputContract({ name: field({}) }, {});
+    expect(errors).toEqual([
+      { field: "name", message: "is required but was not provided" },
+    ]);
+  });
+
+  it("treats null as missing for a required field", () => {
+    const { errors } = applyInputContract({ name: field({}) }, { name: null });
+    expect(errors).toHaveLength(1);
+  });
+
+  it("fills a default for a missing field and reports no error", () => {
+    const { value, errors } = applyInputContract(
+      { topK: field({ required: false, default: 5 }) },
+      {},
+    );
+    expect(errors).toHaveLength(0);
+    expect(value).toEqual({ topK: 5 });
+  });
+
+  it("keeps a provided value over the default", () => {
+    const { value } = applyInputContract(
+      { topK: field({ required: false, default: 5 }) },
+      { topK: 9 },
+    );
+    expect(value).toEqual({ topK: 9 });
+  });
+
+  it("omits an optional field with no default", () => {
+    const { value, errors } = applyInputContract(
+      { note: field({ required: false }) },
+      {},
+    );
+    expect(errors).toHaveLength(0);
+    expect(value).toEqual({});
+  });
+
+  it("preserves extra payload keys not in the schema", () => {
+    const { value } = applyInputContract({ a: field({}) }, { a: 1, extra: 2 });
+    expect(value).toEqual({ a: 1, extra: 2 });
+  });
+
+  it("recurses into nested object contracts", () => {
+    const schema: Record<string, InputField> = {
+      user: field({
+        type: "json",
+        fields: {
+          id: field({}),
+          role: field({ required: false, default: "viewer" }),
+        },
+      }),
+    };
+    const { value, errors } = applyInputContract(schema, { user: { id: "u1" } });
+    expect(errors).toHaveLength(0);
+    expect(value).toEqual({ user: { id: "u1", role: "viewer" } });
+  });
+
+  it("reports a missing nested required field with a dotted path", () => {
+    const schema: Record<string, InputField> = {
+      user: field({ type: "json", fields: { id: field({}) } }),
+    };
+    const { errors } = applyInputContract(schema, { user: {} });
+    expect(errors).toEqual([
+      { field: "user.id", message: "is required but was not provided" },
+    ]);
   });
 });
 

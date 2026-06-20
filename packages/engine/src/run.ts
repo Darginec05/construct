@@ -1,10 +1,12 @@
 import {
+  applyInputContract,
   assertValidFlow,
   parseFlow,
   resolveNodeOutputs,
   type Flow,
   type FlowEdge,
   type FlowNode,
+  type InputField,
   type SwitchCase,
 } from "@construct/dsl";
 import { applyPatch, channelMap, initState } from "./channels.js";
@@ -44,9 +46,29 @@ export async function runFlow(
   if (options.validate !== false) assertValidFlow(parsed);
 
   const channels = channelMap(parsed);
-  const state = initState(parsed, options.input, options.initialState);
   const emit: Emit = options.onEvent ?? (() => {});
   const maxSteps = options.maxSteps ?? 1000;
+
+  // Enforce the input contract before seeding state: fill declared defaults and
+  // collect missing required fields. Skipped for nested bodies (enforceInput
+  // false), whose input is the parent run state, not an external payload.
+  let seedInput = options.input;
+  let contractError: string | undefined;
+  if (options.enforceInput !== false && !options.resume) {
+    const inputNode = parsed.nodes.find((n) => n.type === "input");
+    if (inputNode) {
+      const schema =
+        ((inputNode.config as { schema?: Record<string, InputField> }).schema) ?? {};
+      const { value, errors } = applyInputContract(schema, options.input ?? {});
+      if (errors.length > 0) {
+        contractError = errors.map((e) => `${e.field} ${e.message}`).join("; ");
+      } else {
+        seedInput = value;
+      }
+    }
+  }
+
+  const state = initState(parsed, seedInput, options.initialState);
 
   const nodesById = new Map(parsed.nodes.map((n) => [n.id, n]));
   const outEdges = new Map<string, FlowEdge[]>();
@@ -76,6 +98,10 @@ export async function runFlow(
   const queue: string[] = [];
 
   emit({ type: "run-start", data: { flowId: parsed.id } });
+
+  if (contractError) {
+    return fail(parsed.id, state, `input contract: ${contractError}`, emit);
+  }
 
   // Resume path: don't re-run the paused human node. Apply its captured patch and
   // seed the frontier with the out-edges of `resume.handle`, exactly as if the
@@ -303,7 +329,11 @@ async function runLoop(
 
   let last: RunResult | undefined;
   for (let i = 0; i < max; i++) {
-    const res = await runFlow(body, { ...options, input: { ...state, index: i } });
+    const res = await runFlow(body, {
+      ...options,
+      enforceInput: false,
+      input: { ...state, index: i },
+    });
     if (res.status === "paused") return bubble(node, res);
     if (res.status === "failed") {
       throw new Error(`loop body failed: ${res.error}`);
@@ -354,7 +384,7 @@ async function runMap(
       // `state` first, then the loop bindings — so the per-item item/index
       // always win even if the parent flow has channels of the same name.
       const seed: RunState = { ...state, item: list[i], index: i };
-      const res = await runFlow(body, { ...options, input: seed });
+      const res = await runFlow(body, { ...options, enforceInput: false, input: seed });
       if (res.status === "paused") {
         paused ??= bubble(node, res);
         return;
@@ -404,7 +434,7 @@ async function runSubflow(
 ): Promise<StepOutcome> {
   const body = resolveBody(node.config.flow, options);
   const input = ctx.evaluate(node.config.inputs ?? {}) as RunState;
-  const res = await runFlow(body, { ...options, input });
+  const res = await runFlow(body, { ...options, enforceInput: false, input });
   if (res.status === "paused") return bubble(node, res);
   if (res.status === "failed") {
     throw new Error(`subflow failed: ${res.error}`);
