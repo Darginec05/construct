@@ -151,6 +151,30 @@ describe("builder serialization", () => {
     expect(errorsOf(flow)).toEqual([]);
   });
 
+  it("serializes router reasonTo and clarifyTo channels", () => {
+    const flow = defineFlow("c", "c", (f) => {
+      const text = f.text("text");
+      const why = f.text("why");
+      const question = f.text("question");
+      const out = f.text("out");
+      f.input({ channel: text })
+        .router({
+          model: anthropic("m"),
+          classes: [{ name: "a" }],
+          fallback: true,
+          prompt: text,
+          reasonTo: why,
+          clarifyTo: question,
+        })
+        .to(f.output(out));
+    }).toJSON();
+
+    expect(nodeById(flow, "router")?.config).toMatchObject({
+      reasonTo: "why",
+      clarifyTo: "question",
+    });
+  });
+
   it("throws on duplicate explicit node ids", () => {
     expect(() =>
       defineFlow("c", "c", (f) => {

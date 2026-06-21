@@ -127,6 +127,29 @@ describe("config schemas", () => {
     ).toBe(false);
   });
 
+  it("rejects clarifyTo without the fallback option", () => {
+    const schema = getNodeSpec("router")!.configSchema;
+    expect(
+      schema.safeParse({
+        model: { provider: "a", model: "x" },
+        classes: [{ name: "a" }],
+        clarifyTo: "question",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts clarifyTo when fallback is on", () => {
+    const schema = getNodeSpec("router")!.configSchema;
+    expect(
+      schema.safeParse({
+        model: { provider: "a", model: "x" },
+        classes: [{ name: "a" }],
+        fallback: true,
+        clarifyTo: "question",
+      }).success,
+    ).toBe(true);
+  });
+
   it("parses a structured branch condition and defaults its combinator", () => {
     const cfg = getNodeSpec("branch")!.configSchema.parse({
       condition: { rules: [{ left: "$.count", op: "gt", right: "5" }] },

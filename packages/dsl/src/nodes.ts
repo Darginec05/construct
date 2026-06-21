@@ -208,6 +208,11 @@ export type RouterClass = z.infer<typeof RouterClassSchema>;
  * handle, so downstream edges branch on intent. When `fallback` is on, an extra
  * "fallback" handle catches inputs that match no class — wire it to a default
  * specialist or a clarifying question instead of silently picking the first.
+ *
+ * `clarifyTo` lets the router double as its own clarifier: when it routes to
+ * "fallback" because the input is ambiguous, the model emits a one-line question
+ * in the *same* forced call, which is written to that channel. The fallback
+ * branch can then surface the question directly — no second model call.
  */
 const RouterConfig = z
   .object({
@@ -220,6 +225,9 @@ const RouterConfig = z
     /** Optional variable to store the model's one-line rationale for the pick,
      *  so a downstream node can log or branch on *why* it routed. */
     reasonTo: z.string().optional(),
+    /** Optional variable to store a clarifying question the model produces when
+     *  it routes to "fallback" for an ambiguous input. Requires `fallback`. */
+    clarifyTo: z.string().optional(),
   })
   .superRefine((cfg, ctx) => {
     const names = cfg.classes.map((c) => c.name);
@@ -241,6 +249,13 @@ const RouterConfig = z
           message: `"fallback" is reserved — turn on the fallback option instead of naming a route "fallback"`,
         });
       }
+    }
+    if (cfg.clarifyTo !== undefined && cfg.fallback !== true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["clarifyTo"],
+        message: "clarifyTo requires the fallback option — the question is only produced on the fallback branch",
+      });
     }
   });
 

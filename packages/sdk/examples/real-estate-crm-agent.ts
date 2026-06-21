@@ -19,7 +19,8 @@ import { isMain, printFlowReport } from "./_util.js";
  *     - read / content / file  → multi-step Sonnet agent with read-only tools
  *     - smalltalk / refuse      → cheap Haiku reply, no tools
  *     - write / bulk / agent    → propose a change, HUMAN approves, then apply
- *     - low confidence          → router "fallback" handle asks one question
+ *     - low confidence          → router emits its own clarifying question
+ *                                 (clarifyTo) — no extra model call
  *
  * Per-intent budgets mirror the real gateway: smalltalk/refuse cap output at
  * 400 tokens; bulk/agent get a 32k window (a batch update carries large JSON);
@@ -253,6 +254,9 @@ export const realEstateCrmAgent = defineFlow(
         prompt: f.tpl`${message}`,
         writeTo: intent,
         fallback: true,
+        // On an ambiguous input the router routes to "fallback" AND writes a
+        // clarifying question to `reply` in the same call — no extra model call.
+        clarifyTo: reply,
         classes: [
           { name: "smalltalk", description: "Greetings, thanks, chit-chat with no task." },
           { name: "read", description: "Look up units, leads, or projects." },
@@ -260,7 +264,11 @@ export const realEstateCrmAgent = defineFlow(
           { name: "file", description: "Questions about an attached document or image." },
           { name: "write", description: "Change a single unit or lead." },
           { name: "bulk", description: "Change many units or leads at once." },
-          { name: "agent", description: "Multi-step task that ends in a write or bulk change." },
+          // Single-handle routers can't fire several branches, so requests that
+          // combine capabilities (e.g. rewrite copy AND bulk-update) — what a
+          // multi-label router would tag with secondary intents — route here:
+          // the full-kit branch carries read + content tools and applies a batch.
+          { name: "agent", description: "Multi-step task, or one that combines capabilities (e.g. rewrite copy and bulk-update), ending in a change." },
           { name: "refuse", description: "Out-of-scope or disallowed request." },
         ],
       });
@@ -328,17 +336,9 @@ export const realEstateCrmAgent = defineFlow(
       })
       .to(out);
 
-    // Low confidence / no clear match — ask one clarifying question.
-    router
-      .on("fallback")
-      .agent({
-        label: "Clarify",
-        model: haikuShort,
-        system: "Ask exactly one short clarifying question.",
-        prompt: f.tpl`${message}`,
-        writeTo: reply,
-      })
-      .to(out);
+    // Low confidence / no clear match — the router already wrote a clarifying
+    // question to `reply` (clarifyTo), so this branch just surfaces it.
+    router.on("fallback").to(out);
 
     // Mutations go through a human-gated approval subflow.
     router
