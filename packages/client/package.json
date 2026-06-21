@@ -11,7 +11,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
@@ -19,9 +21,19 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@construct/dsl": "*"
+    "@construct/dsl": "^0.0.0"
   },
   "devDependencies": {
     "typescript": "^5.6.3"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Darginec05/construct.git",
+    "directory": "packages/client"
+  },
+  "homepage": "https://github.com/Darginec05/construct#readme",
+  "bugs": "https://github.com/Darginec05/construct/issues"
 }
