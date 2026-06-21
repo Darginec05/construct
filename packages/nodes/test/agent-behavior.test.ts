@@ -297,3 +297,42 @@ describe("agent resilience & observability", () => {
     expect(usage[0]!.data).toEqual({ inputTokens: 10, outputTokens: 5 });
   });
 });
+
+describe("agent history (multi-turn)", () => {
+  it("replays prior user/assistant turns between system and the current prompt", async () => {
+    const fake = createFakeProvider({ id: "fake", script: [{ text: "ok", stopReason: "end_turn" }] });
+    registerProvider(fake);
+
+    const res = await runFlow(flowWith({ system: "be brief", history: "$.history" }), {
+      input: {
+        history: [
+          { role: "user", content: "hi" },
+          { role: "assistant", content: "hello" },
+          // Non-replayable entries are dropped defensively (boundary input).
+          { role: "tool", content: "ignored" },
+          "garbage",
+          { role: "user" },
+        ],
+      },
+    });
+
+    expect(res.status).toBe("completed");
+    const sent = fake.calls[0]!.messages.map((m) => [m.role, m.content]);
+    expect(sent).toEqual([
+      ["system", "be brief"],
+      ["user", "hi"],
+      ["assistant", "hello"],
+      ["user", "go"],
+    ]);
+  });
+
+  it("sends only system + current prompt when no history channel is set", async () => {
+    const fake = createFakeProvider({ id: "fake", script: [{ text: "ok", stopReason: "end_turn" }] });
+    registerProvider(fake);
+
+    const res = await runFlow(flowWith({ system: "be brief" }), { input: {} });
+
+    expect(res.status).toBe("completed");
+    expect(fake.calls[0]!.messages.map((m) => m.role)).toEqual(["system", "user"]);
+  });
+});

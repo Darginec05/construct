@@ -180,6 +180,14 @@ const AgentConfig = z.object({
    */
   system: z.union([PromptSourceSchema, z.array(PromptSourceSchema)]).optional(),
   prompt: PromptSourceSchema.optional(),
+  /**
+   * Prior conversation turns for a multi-turn session. An expression that
+   * evaluates against run state to a list of `{ role: "user" | "assistant",
+   * content: string }`, spliced between `system` and the current `prompt` so the
+   * model sees the history. The host (cloud) windows and persists this list; the
+   * engine only reads it. Malformed entries are ignored at runtime.
+   */
+  history: ExprSchema.optional(),
   tools: z.array(z.string()).default([]),
   toolChoice: z.enum(["auto", "required", "none"]).default("auto"),
   /** Cap on tool-use iterations before the loop is force-closed. */

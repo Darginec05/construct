@@ -60,6 +60,10 @@ export interface AgentOpts extends NodeId {
   model: ModelRef;
   system?: string;
   prompt?: ExprInput;
+  /** Prior conversation turns for a multi-turn session: a channel holding a list
+   *  of `{ role: "user" | "assistant", content: string }`, replayed before the
+   *  current prompt. The host windows/persists it; the engine only reads it. */
+  history?: ExprInput;
   tools?: Tool[];
   toolChoice?: "auto" | "required" | "none";
   maxSteps?: number;
@@ -221,6 +225,7 @@ abstract class Connector {
       model: opts.model,
       system: opts.system,
       prompt: opts.prompt === undefined ? undefined : toExpr(opts.prompt),
+      history: opts.history === undefined ? undefined : toExpr(opts.history),
       tools: opts.tools?.map((t) => t.name),
       toolChoice: opts.toolChoice,
       maxSteps: opts.maxSteps,
