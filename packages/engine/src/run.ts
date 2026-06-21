@@ -153,6 +153,7 @@ export async function runFlow(
       evaluate: (e, scope) => evaluate(e, scope ? { ...state, ...scope } : state),
       onDelta: (text) => emit({ type: "token", nodeId, data: text }),
       onUsage: (usage) => emit({ type: "usage", nodeId, data: usage }),
+      onPartial: (json) => emit({ type: "node-partial", nodeId, data: json }),
       getProvider: providers ? (id) => providers[id] : undefined,
       getTool: tools ? (name) => tools[name] : undefined,
       getPrompt: prompts ? (ref) => prompts[ref] : undefined,
@@ -263,12 +264,17 @@ async function stepNode(
         return { patch: decision.patch, handle: decision.handle };
       }
       const cfg = node.config as Record<string, unknown>;
+      // Interpolate the prompt against run state so a `{{channel}}` token (e.g. a
+      // question an upstream agent wrote) surfaces in the pause shown to the human.
+      // A plain prompt with no `$.`/`{{` passes through unchanged.
+      const prompt =
+        typeof cfg.prompt === "string" ? String(ctx.evaluate(cfg.prompt) ?? "") : undefined;
       return {
         pause: {
           nodeId: node.id,
           exits: resolveNodeOutputs(node.type, node.config),
           mode: typeof cfg.mode === "string" ? cfg.mode : undefined,
-          prompt: typeof cfg.prompt === "string" ? cfg.prompt : undefined,
+          prompt,
           writeTo: typeof cfg.writeTo === "string" ? cfg.writeTo : undefined,
         },
       };

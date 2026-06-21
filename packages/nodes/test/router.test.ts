@@ -70,6 +70,30 @@ function toolCallResult(route: string, reason = "fits best"): ChatResult {
   };
 }
 
+const DEFAULT_CLARIFICATION =
+  "Could you add a bit more detail about what you'd like me to do?";
+
+/** A fallback-routing tool call that may carry a clarifying question. */
+function clarifyResult(route: string, clarification?: string): ChatResult {
+  const args: Record<string, unknown> = { reason: "ambiguous", route };
+  if (clarification !== undefined) args.clarification = clarification;
+  return {
+    text: "",
+    toolCalls: [{ id: "t1", name: "select_route", arguments: args }],
+    stopReason: "tool_use",
+  };
+}
+
+/** Router with `clarifyTo` wired; the fallback branch surfaces the question. */
+function buildClarifyFlow(): Flow {
+  const flow = buildFlow(true);
+  flow.channels.push({ name: "ask", type: "text", reducer: "lastValue" });
+  (flow.nodes[1]!.config as { clarifyTo?: string }).clarifyTo = "ask";
+  const fb = flow.nodes.find((n) => n.id === "fb");
+  if (fb) fb.config = { from: "$.ask" };
+  return flow;
+}
+
 function provider(step: ChatResult): FakeProvider {
   const p = createFakeProvider({ id: "fake", script: [step] });
   registerProvider(p);
@@ -157,5 +181,36 @@ describe("router node", () => {
     });
     const tokens = events.filter((e) => e.type === "token" && e.nodeId === "route");
     expect(tokens.map((t) => t.data).join("")).toContain("clearly grateful");
+  });
+
+  it("offers a clarification arg only when clarifyTo is wired", async () => {
+    const fake = provider(clarifyResult("fallback", "Which project?"));
+    await runFlow(buildClarifyFlow(), { input: { text: "do the thing" } });
+    const props = fake.calls[0]!.options.tools![0]!.parameters.properties as Record<
+      string,
+      unknown
+    >;
+    expect(props.clarification).toBeDefined();
+  });
+
+  it("writes the model's clarifying question to clarifyTo on fallback", async () => {
+    provider(clarifyResult("fallback", "Which project did you mean?"));
+    const res = await runFlow(buildClarifyFlow(), { input: { text: "update it" } });
+    expect(res.state.choice).toBe("fallback");
+    expect(res.state.ask).toBe("Which project did you mean?");
+    expect(res.output).toBe("Which project did you mean?");
+  });
+
+  it("defaults the question when fallback is chosen without one", async () => {
+    provider(clarifyResult("fallback"));
+    const res = await runFlow(buildClarifyFlow(), { input: { text: "???" } });
+    expect(res.state.ask).toBe(DEFAULT_CLARIFICATION);
+  });
+
+  it("does not write a question on a confident route", async () => {
+    provider(clarifyResult("positive", "ignored on a confident pick"));
+    const res = await runFlow(buildClarifyFlow(), { input: { text: "thanks!" } });
+    expect(res.state.choice).toBe("positive");
+    expect(res.state.ask).toBeUndefined();
   });
 });

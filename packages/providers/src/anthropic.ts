@@ -192,12 +192,34 @@ export function createAnthropicProvider(
       if (!opts.model) throw new Error(`provider "${id}": missing model`);
       const params = buildParams(messages, opts, defaultMaxTokens);
 
-      if (opts.onDelta) {
+      if (opts.onDelta || opts.onToolArgs) {
         const stream = getClient().messages.stream(params);
         // finalMessage() rejects on error; the no-op listener just keeps the
         // EventEmitter from throwing an unhandled "error" first.
         stream.on("error", () => {});
-        stream.on("text", (delta) => opts.onDelta!(delta));
+        if (opts.onDelta) stream.on("text", (delta) => opts.onDelta!(delta));
+        if (opts.onToolArgs) {
+          // Tool-call arguments stream as `input_json_delta` fragments. Accumulate
+          // them per content block (tagged with the tool name from its opening
+          // content_block_start) and surface the CUMULATIVE JSON-so-far, so the
+          // host re-parses one growing snapshot. Buffers are per-stream, so a
+          // chatWithRetry re-attempt starts clean instead of concatenating onto
+          // an aborted attempt's bytes.
+          const argBlocks = new Map<number, { name: string; json: string }>();
+          stream.on("streamEvent", (event) => {
+            if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
+              argBlocks.set(event.index, { name: event.content_block.name, json: "" });
+            } else if (
+              event.type === "content_block_delta" &&
+              event.delta.type === "input_json_delta"
+            ) {
+              const block = argBlocks.get(event.index);
+              if (!block) return;
+              block.json += event.delta.partial_json;
+              opts.onToolArgs!(block.name, block.json);
+            }
+          });
+        }
         return fromMessage(await stream.finalMessage());
       }
       return fromMessage(await getClient().messages.create(params));

@@ -47,6 +47,28 @@ export function NodeLibrary() {
             </div>
             {g.entries.map((e) => {
               const Icon = e.icon;
+              if (e.comingSoon) {
+                return (
+                  <div
+                    key={e.type}
+                    aria-disabled
+                    title="Coming soon"
+                    style={{ "--cat": `var(${CATEGORY_META[e.category].hueVar})` } as React.CSSProperties}
+                    className="flex cursor-not-allowed items-center gap-2.5 rounded-md px-2 py-1.5 opacity-50"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[hsl(var(--cat)/0.14)] text-[hsl(var(--cat))]">
+                      <Icon size={15} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px] font-medium">{e.label}</div>
+                      <div className="truncate text-[11px] text-muted-foreground">{e.description}</div>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Soon
+                    </span>
+                  </div>
+                );
+              }
               return (
                 <div
                   key={e.type}

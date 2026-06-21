@@ -29,6 +29,13 @@ export interface ChatOptions {
   toolChoice?: "auto" | "required" | "none";
   /** Called with each text chunk as it streams in. Providers may ignore it. */
   onDelta?: (text: string) => void;
+  /**
+   * Called as a streaming tool call's arguments build up, with the CUMULATIVE
+   * JSON-so-far (not just the latest fragment) and the tool name. Lets a host
+   * progressively render a structured (tool-call) answer by re-parsing one
+   * growing snapshot. Providers may ignore it.
+   */
+  onToolArgs?: (toolName: string, partialJson: string) => void;
   [key: string]: unknown;
 }
 

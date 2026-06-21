@@ -17,7 +17,8 @@ export interface RunEvent {
     | "token"
     | "usage"
     | "error"
-    | "node-progress";
+    | "node-progress"
+    | "node-partial";
   nodeId?: string;
   data?: unknown;
 }
@@ -187,6 +188,12 @@ export interface ExecutorContext {
   onDelta(text: string): void;
   /** Report token usage for one model turn as a `usage` event. */
   onUsage?: (usage: TokenUsage) => void;
+  /**
+   * Emit a cumulative partial-JSON snapshot of a streaming structured answer as a
+   * `node-partial` event, so a host can progressively render the value as the
+   * model's tool-call arguments build up. Absent unless the host wired streaming.
+   */
+  onPartial?: (json: string) => void;
   /**
    * Resolve a per-run model provider by id, set from `RunOptions.providers`.
    * Returns `unknown` because the engine is model-agnostic; provider-aware

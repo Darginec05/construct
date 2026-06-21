@@ -80,6 +80,10 @@ export interface RouterOpts extends NodeId {
   /** Add a built-in "fallback" handle for low-confidence / no-match inputs. */
   fallback?: boolean;
   writeTo?: ChannelHandle | string;
+  /** Store the model's one-line rationale for the pick. */
+  reasonTo?: ChannelHandle | string;
+  /** Store a clarifying question produced when routing to "fallback". Requires `fallback`. */
+  clarifyTo?: ChannelHandle | string;
 }
 
 export interface BranchOpts extends NodeId {
@@ -233,6 +237,8 @@ abstract class Connector {
       classes: opts.classes,
       fallback: opts.fallback,
       writeTo: toChannel(opts.writeTo),
+      reasonTo: toChannel(opts.reasonTo),
+      clarifyTo: toChannel(opts.clarifyTo),
     }));
   }
 

@@ -282,11 +282,18 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
   let pendingTools = false;
 
   for (let step = 0; step < stepCap; step++) {
+    // On the final permitted step of a structured agent, drop the real tools and
+    // offer only `respond`, so the loop always commits a schema-valid answer
+    // rather than throwing when the model would otherwise keep calling tools. A
+    // non-structured agent has no such fallback — its exhaustion stays an error.
+    const lastStep = step === stepCap - 1;
+    const stepTools = structured && lastStep ? [structured.tool] : tools;
+
     // Force a tool only on the first turn for "required" (commit to acting),
     // then relax so the model can finish. With a structured schema, keep forcing
     // a tool so the model can't answer in prose — it must call `respond`.
     const choice: "auto" | "required" | "none" =
-      tools.length === 0
+      stepTools.length === 0
         ? "none"
         : structured
           ? "required"
@@ -296,13 +303,24 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
               : "auto"
             : toolChoice;
 
+    const onPartial = ctx.onPartial;
     const res = await chatWithRetry(provider, messages, {
       model: model!.model,
       temperature: model!.temperature,
       maxTokens: model!.maxTokens,
-      tools: tools.length > 0 ? tools : undefined,
-      toolChoice: tools.length > 0 ? choice : undefined,
+      tools: stepTools.length > 0 ? stepTools : undefined,
+      toolChoice: stepTools.length > 0 ? choice : undefined,
       onDelta: (text) => ctx.onDelta(text),
+      // Stream the structured answer as it builds: forward the `respond` tool's
+      // cumulative arguments for progressive rendering. Other tool calls (mid-loop
+      // actions) are not the final answer, so they are ignored here.
+      ...(structured && onPartial
+        ? {
+            onToolArgs: (name: string, json: string): void => {
+              if (name === RESPOND_TOOL) onPartial(json);
+            },
+          }
+        : {}),
     });
 
     if (res.usage) {
@@ -413,28 +431,43 @@ function matchClass(text: string, names: string[]): string | undefined {
   return ranked.find((c) => lower.includes(c.toLowerCase()));
 }
 
+/** Default question written to `clarifyTo` when the model routes to fallback
+ *  without supplying one — keeps the no-second-call guarantee. */
+const DEFAULT_CLARIFICATION =
+  "Could you add a bit more detail about what you'd like me to do?";
+
 /**
  * The forced-choice tool: a single `route` enum constrains the model to one of
  * the branch names, and a `reason` (asked first, so the model commits to a
- * rationale before the label) is streamed back for observability.
+ * rationale before the label) is streamed back for observability. When
+ * `clarify` is on, the tool also accepts a `clarification` question the model
+ * fills *only* when it routes to "fallback" for an ambiguous input.
  */
-function routeTool(choices: string[]): ToolSpec {
+function routeTool(choices: string[], clarify: boolean): ToolSpec {
+  const properties: Record<string, unknown> = {
+    reason: {
+      type: "string",
+      description: "One sentence: why this branch fits the input.",
+    },
+    route: {
+      type: "string",
+      enum: choices,
+      description: "The branch to take. Must be one of the listed names.",
+    },
+  };
+  if (clarify) {
+    properties.clarification = {
+      type: "string",
+      description:
+        "Only when you route to 'fallback' because the input is ambiguous: a single short question that would let you pick a branch. Omit otherwise.",
+    };
+  }
   return {
     name: ROUTE_TOOL,
     description: "Commit to exactly one branch for the input.",
     parameters: {
       type: "object",
-      properties: {
-        reason: {
-          type: "string",
-          description: "One sentence: why this branch fits the input.",
-        },
-        route: {
-          type: "string",
-          enum: choices,
-          description: "The branch to take. Must be one of the listed names.",
-        },
-      },
+      properties,
       required: ["reason", "route"],
     },
   };
@@ -464,6 +497,7 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
   const provider = requireProvider(ctx, model, "router");
   const classes = (ctx.config.classes as RouterClass[]) ?? [];
   const fallback = ctx.config.fallback === true;
+  const clarify = fallback && typeof ctx.config.clarifyTo === "string";
   const names = classes.map((c) => c.name);
   const choices = fallback ? [...names, ROUTER_FALLBACK] : names;
   const prompt = resolvePromptSource(ctx, ctx.config.prompt, "router");
@@ -483,7 +517,7 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
       model: model!.model,
       temperature: model!.temperature ?? 0,
       maxTokens: model!.maxTokens ?? 256,
-      tools: [routeTool(choices)],
+      tools: [routeTool(choices, clarify)],
       toolChoice: "required",
     },
   );
@@ -495,6 +529,10 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
     call && typeof call.arguments.route === "string" ? call.arguments.route : res.text;
   const reason =
     call && typeof call.arguments.reason === "string" ? call.arguments.reason : "";
+  const clarification =
+    call && typeof call.arguments.clarification === "string"
+      ? call.arguments.clarification
+      : "";
   if (reason) ctx.onDelta(reason);
 
   // Canonicalize the model's pick to a real branch. When nothing matches —
@@ -514,6 +552,12 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
   const writes: Record<string, unknown> = {};
   if (typeof ctx.config.writeTo === "string") writes[ctx.config.writeTo] = chosen;
   if (typeof ctx.config.reasonTo === "string") writes[ctx.config.reasonTo] = reason;
+  // On the fallback branch, surface a clarifying question so the downstream can
+  // ask it without a second model call. The model supplies one when the input
+  // is ambiguous; default to a generic prompt if it routed to fallback silently.
+  if (clarify && chosen === ROUTER_FALLBACK) {
+    writes[ctx.config.clarifyTo as string] = clarification || DEFAULT_CLARIFICATION;
+  }
   return Object.keys(writes).length > 0 ? { patch: writes, handle: chosen } : { handle: chosen };
 }
 

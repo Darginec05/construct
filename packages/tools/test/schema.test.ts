@@ -52,6 +52,33 @@ describe("toJsonSchema", () => {
     });
   });
 
+  it("emits anyOf for a plain union", () => {
+    expect(toJsonSchema(z.union([z.string(), z.number()]))).toEqual({
+      anyOf: [{ type: "string" }, { type: "number" }],
+    });
+  });
+
+  it("emits anyOf for a discriminated union, preserving each tag", () => {
+    const schema = z.discriminatedUnion("status", [
+      z.object({ status: z.literal("ready"), value: z.number() }),
+      z.object({ status: z.literal("need_info"), question: z.string() }),
+    ]);
+    expect(toJsonSchema(schema)).toEqual({
+      anyOf: [
+        {
+          type: "object",
+          properties: { status: { const: "ready" }, value: { type: "number" } },
+          required: ["status", "value"],
+        },
+        {
+          type: "object",
+          properties: { status: { const: "need_info" }, question: { type: "string" } },
+          required: ["status", "question"],
+        },
+      ],
+    });
+  });
+
   it("falls back to an open value for unknown shapes", () => {
     expect(toJsonSchema(z.unknown())).toEqual({});
   });

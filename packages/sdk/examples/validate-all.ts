@@ -2,6 +2,7 @@ import { codeReview } from "./code-review.js";
 import { contentStudio } from "./content-studio.js";
 import { documentIntake } from "./document-intake.js";
 import { incidentResponse } from "./incident-response.js";
+import { realEstateCrmAgent } from "./real-estate-crm-agent.js";
 import { salesOutbound } from "./sales-outbound.js";
 import { supervisor } from "./supervisor.js";
 import { supportHub } from "./support-hub.js";
@@ -15,6 +16,7 @@ const FLOWS: FlowReport[] = [
   codeReview,
   supervisor,
   contentStudio,
+  realEstateCrmAgent,
 ];
 
 let failed = false;
