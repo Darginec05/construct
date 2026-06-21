@@ -50,6 +50,18 @@ describe("human pause + resume", () => {
     });
   });
 
+  it("interpolates a {{channel}} token in the prompt against run state", async () => {
+    const asking: Flow = {
+      ...flow,
+      nodes: flow.nodes.map((n) =>
+        n.id === "gate" ? { ...n, config: { ...n.config, prompt: "Please clarify: {{text}}" } } : n,
+      ),
+    };
+    const res = await runFlow(asking, { input: { text: "what budget?" } });
+    expect(res.status).toBe("paused");
+    expect(res.pause?.prompt).toBe("Please clarify: what budget?");
+  });
+
   it("resumes down the chosen handle, applying the captured patch", async () => {
     const paused = await runFlow(flow, { input: { text: "hi" } });
     const events: RunEvent[] = [];

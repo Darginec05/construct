@@ -13,3 +13,4 @@ export { supervisor } from "./supervisor.js";
 export { contentStudio } from "./content-studio.js";
 export { launchAnnouncement } from "./launch-announcement.js";
 export { cmoStrategist } from "./cmo-strategist.js";
+export { realEstateCrmAgent } from "./real-estate-crm-agent.js";

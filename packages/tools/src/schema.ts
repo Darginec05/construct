@@ -61,6 +61,17 @@ export function toJsonSchema(schema: z.ZodTypeAny): Json {
       if (required.length > 0) out.required = required;
       return describe(schema, out);
     }
+    case "ZodUnion":
+    case "ZodDiscriminatedUnion": {
+      // Both map to a JSON Schema `anyOf`. A discriminated union's options each
+      // carry their literal discriminant (a `const`), so the tag survives without
+      // emitting a separate JSON Schema `discriminator` (which not every model
+      // honors). `_def.options` is an array in modern zod; older builds expose a
+      // Map, so tolerate both.
+      const raw = d.options as z.ZodTypeAny[] | Map<unknown, z.ZodTypeAny>;
+      const options = Array.isArray(raw) ? raw : [...raw.values()];
+      return describe(schema, { anyOf: options.map((o) => toJsonSchema(o)) });
+    }
     // Unwrap wrappers, preserving a description set on the wrapper itself.
     case "ZodOptional":
     case "ZodNullable":
