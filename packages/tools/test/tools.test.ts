@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   defineTool,
   getTool,
+  higherTier,
   listTools,
   needsApproval,
   registerTool,
@@ -123,6 +124,27 @@ describe("needsApproval", () => {
   it("honors a custom gated-tier set", () => {
     expect(needsApproval({ tier: "content" }, ["content"])).toBe(true);
     expect(needsApproval({ tier: "write" }, ["content"])).toBe(false);
+  });
+});
+
+describe("higherTier", () => {
+  it("returns the more dangerous of two tiers", () => {
+    expect(higherTier("read", "dangerous")).toBe("dangerous");
+    expect(higherTier("dangerous", "read")).toBe("dangerous");
+    expect(higherTier("write", "bulk")).toBe("bulk");
+  });
+
+  it("treats undefined as the lowest risk", () => {
+    expect(higherTier(undefined, "write")).toBe("write");
+    expect(higherTier("write", undefined)).toBe("write");
+    expect(higherTier(undefined, undefined)).toBeUndefined();
+  });
+
+  it("escalates an untiered tool but never relaxes a gated one", () => {
+    // A node tier can raise a read tool to a gated tier...
+    expect(needsApproval({ tier: higherTier("dangerous", "read") })).toBe(true);
+    // ...but cannot downgrade an intrinsically dangerous tool.
+    expect(needsApproval({ tier: higherTier("read", "dangerous") })).toBe(true);
   });
 });
 

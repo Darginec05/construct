@@ -48,6 +48,24 @@ export function needsApproval(
   return tool.tier != null && gatedTiers.includes(tool.tier);
 }
 
+/** Tool tiers ordered low -> high risk, matching the DSL `ToolTier` enum. */
+const TIER_ORDER: readonly ToolTier[] = ["read", "content", "write", "bulk", "dangerous"];
+
+/**
+ * The higher-risk of two tiers, treating `undefined` as the lowest risk. Used to
+ * let a `tool` node *escalate* — never relax — the registered tool's intrinsic
+ * tier: the stricter classification always wins, so a node setting can raise the
+ * gate on a specific call but can't ungate an intrinsically dangerous tool.
+ */
+export function higherTier(
+  a: ToolTier | undefined,
+  b: ToolTier | undefined,
+): ToolTier | undefined {
+  if (a == null) return b;
+  if (b == null) return a;
+  return TIER_ORDER.indexOf(a) >= TIER_ORDER.indexOf(b) ? a : b;
+}
+
 export {
   defineTool,
   registerTool,

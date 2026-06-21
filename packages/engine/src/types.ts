@@ -16,7 +16,8 @@ export interface RunEvent {
     | "paused"
     | "token"
     | "usage"
-    | "error";
+    | "error"
+    | "node-progress";
   nodeId?: string;
   data?: unknown;
 }
