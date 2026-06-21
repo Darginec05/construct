@@ -71,6 +71,39 @@ describe("agent structured output", () => {
     expect(respond.parameters).toMatchObject({ type: "object", required: ["pass"] });
   });
 
+  it("forces respond on the final step instead of throwing when the model keeps calling tools", async () => {
+    registerTool(
+      defineTool({ name: "calc", description: "Compute", tier: "read", run: () => "42" }),
+    );
+    const fake = createFakeProvider({
+      id: "fake",
+      script: [
+        // Step 0: the model burns the step on a real tool call instead of answering.
+        { text: "", toolCalls: [{ id: "c1", name: "calc", arguments: {} }], stopReason: "tool_use" },
+        // Step 1 (last permitted): only `respond` is offered, so it must commit.
+        {
+          text: "",
+          toolCalls: [{ id: "r1", name: "respond", arguments: { pass: true } }],
+          stopReason: "tool_use",
+        },
+      ],
+    });
+    registerProvider(fake);
+
+    const res = await runFlow(
+      flowWith({ output: { schema: VERDICT_SCHEMA }, tools: ["calc"], maxSteps: 2 }, "json"),
+      { input: {} },
+    );
+
+    expect(res.status).toBe("completed");
+    expect(res.state.out).toEqual({ pass: true });
+    // The first step offered the real tool; the final step dropped it and left
+    // only the schema-typed respond tool so the loop could always commit.
+    expect(fake.calls[0]!.options.tools!.map((t) => t.name)).toEqual(["calc", "respond"]);
+    expect(fake.calls[1]!.options.tools!.map((t) => t.name)).toEqual(["respond"]);
+    expect(fake.calls[1]!.options.toolChoice).toBe("required");
+  });
+
   it("falls back to parsing prose JSON when the provider skips the tool", async () => {
     registerProvider(
       createFakeProvider({

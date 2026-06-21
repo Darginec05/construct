@@ -10,6 +10,7 @@ import ReactFlow, {
   type Node,
 } from "reactflow";
 import "reactflow/dist/style.css";
+import { isComingSoon } from "../lib/catalog.ts";
 import { DND_TYPE } from "../components/node-library.tsx";
 import { ConstructNode, type ConstructNodeData } from "./construct-node.tsx";
 import { useWorkspace } from "./workspace-context.tsx";
@@ -46,7 +47,7 @@ function CanvasInner() {
     (e: React.DragEvent) => {
       e.preventDefault();
       const type = e.dataTransfer.getData(DND_TYPE);
-      if (!type) return;
+      if (!type || isComingSoon(type)) return;
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const node: Node<ConstructNodeData> = {
         id: `${type}-${++nodeSeq}`,

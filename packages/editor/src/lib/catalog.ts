@@ -67,6 +67,18 @@ const PRESENTATION: Record<string, NodePresentation> = {
   subflow: { label: "Subflow", icon: Workflow },
 };
 
+/**
+ * Node types that are catalogued but not yet usable: shown in the library with a
+ * "Soon" badge and not draggable onto the canvas. `code` is parked here because
+ * its only runtime path is a host-registered `ref` (no inline execution, which
+ * would need a sandbox), so there is nothing for an author to wire yet.
+ */
+export const COMING_SOON: ReadonlySet<string> = new Set(["code"]);
+
+export function isComingSoon(type: string): boolean {
+  return COMING_SOON.has(type);
+}
+
 export interface CatalogEntry {
   type: string;
   label: string;
@@ -74,6 +86,8 @@ export interface CatalogEntry {
   category: NodeCategory;
   icon: LucideIcon;
   spec: NodeSpec;
+  /** Catalogued but not yet usable — rendered disabled with a "Soon" badge. */
+  comingSoon: boolean;
 }
 
 function present(spec: NodeSpec): CatalogEntry {
@@ -85,6 +99,7 @@ function present(spec: NodeSpec): CatalogEntry {
     category: spec.category,
     icon: p.icon,
     spec,
+    comingSoon: COMING_SOON.has(spec.type),
   };
 }
 
