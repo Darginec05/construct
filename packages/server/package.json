@@ -11,7 +11,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -27,10 +29,10 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@construct/dsl": "*",
-    "@construct/engine": "*",
-    "@construct/nodes": "*",
-    "@construct/providers": "*",
+    "@construct/dsl": "^0.0.0",
+    "@construct/engine": "^0.0.0",
+    "@construct/nodes": "^0.0.0",
+    "@construct/providers": "^0.0.0",
     "@hono/node-server": "^1.13.7",
     "hono": "^4.6.14"
   },
@@ -38,5 +40,15 @@
     "@types/node": "^22.10.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Darginec05/construct.git",
+    "directory": "packages/server"
+  },
+  "homepage": "https://github.com/Darginec05/construct#readme",
+  "bugs": "https://github.com/Darginec05/construct/issues"
 }

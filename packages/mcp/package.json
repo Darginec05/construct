@@ -12,7 +12,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
@@ -21,12 +23,22 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@construct/tools": "*",
+    "@construct/tools": "^0.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
     "vitest": "^2.1.8",
     "zod": "^3.25.76"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Darginec05/construct.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/Darginec05/construct#readme",
+  "bugs": "https://github.com/Darginec05/construct/issues"
 }

@@ -11,7 +11,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
@@ -21,8 +23,8 @@
     "clean": "rm -rf dist examples-dist .turbo"
   },
   "dependencies": {
-    "@construct/dsl": "*",
-    "@construct/tools": "*",
+    "@construct/dsl": "^0.0.0",
+    "@construct/tools": "^0.0.0",
     "zod": "^3.23.8"
   },
   "peerDependencies": {
@@ -30,8 +32,12 @@
     "@construct/nodes": "*"
   },
   "peerDependenciesMeta": {
-    "@construct/engine": { "optional": true },
-    "@construct/nodes": { "optional": true }
+    "@construct/engine": {
+      "optional": true
+    },
+    "@construct/nodes": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@construct/engine": "*",
@@ -40,5 +46,15 @@
     "@types/node": "^20.14.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Darginec05/construct.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://github.com/Darginec05/construct#readme",
+  "bugs": "https://github.com/Darginec05/construct/issues"
 }
