@@ -153,6 +153,7 @@ export async function runFlow(
       evaluate: (e, scope) => evaluate(e, scope ? { ...state, ...scope } : state),
       onDelta: (text) => emit({ type: "token", nodeId, data: text }),
       onUsage: (usage) => emit({ type: "usage", nodeId, data: usage }),
+      onPartial: (json) => emit({ type: "node-partial", nodeId, data: json }),
       getProvider: providers ? (id) => providers[id] : undefined,
       getTool: tools ? (name) => tools[name] : undefined,
       getPrompt: prompts ? (ref) => prompts[ref] : undefined,

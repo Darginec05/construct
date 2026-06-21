@@ -282,11 +282,18 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
   let pendingTools = false;
 
   for (let step = 0; step < stepCap; step++) {
+    // On the final permitted step of a structured agent, drop the real tools and
+    // offer only `respond`, so the loop always commits a schema-valid answer
+    // rather than throwing when the model would otherwise keep calling tools. A
+    // non-structured agent has no such fallback — its exhaustion stays an error.
+    const lastStep = step === stepCap - 1;
+    const stepTools = structured && lastStep ? [structured.tool] : tools;
+
     // Force a tool only on the first turn for "required" (commit to acting),
     // then relax so the model can finish. With a structured schema, keep forcing
     // a tool so the model can't answer in prose — it must call `respond`.
     const choice: "auto" | "required" | "none" =
-      tools.length === 0
+      stepTools.length === 0
         ? "none"
         : structured
           ? "required"
@@ -296,13 +303,24 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
               : "auto"
             : toolChoice;
 
+    const onPartial = ctx.onPartial;
     const res = await chatWithRetry(provider, messages, {
       model: model!.model,
       temperature: model!.temperature,
       maxTokens: model!.maxTokens,
-      tools: tools.length > 0 ? tools : undefined,
-      toolChoice: tools.length > 0 ? choice : undefined,
+      tools: stepTools.length > 0 ? stepTools : undefined,
+      toolChoice: stepTools.length > 0 ? choice : undefined,
       onDelta: (text) => ctx.onDelta(text),
+      // Stream the structured answer as it builds: forward the `respond` tool's
+      // cumulative arguments for progressive rendering. Other tool calls (mid-loop
+      // actions) are not the final answer, so they are ignored here.
+      ...(structured && onPartial
+        ? {
+            onToolArgs: (name: string, json: string): void => {
+              if (name === RESPOND_TOOL) onPartial(json);
+            },
+          }
+        : {}),
     });
 
     if (res.usage) {

@@ -125,11 +125,15 @@ describe("builder serialization", () => {
     const flow = defineFlow("c", "c", (f) => {
       const kind = f.json("kind");
       const out = f.json("out");
-      const gate = f.input({ channel: kind }).switch({ on: kind, cases: ["x", "y"] });
+      // A flow declares exactly one input node; the single entry fans out to
+      // both the switch and the router.
+      const entry = f.input({ channel: kind });
+
+      const gate = entry.switch({ on: kind, cases: ["x", "y"] });
       gate.on("x").transform({ expr: kind, writeTo: out }).to(f.output(out, { id: "outX" }));
       gate.on("y").transform({ expr: kind, writeTo: out }).to(f.output(out, { id: "outY" }));
 
-      f.input()
+      entry
         .router({
           model: anthropic("m"),
           classes: [{ name: "a" }],
