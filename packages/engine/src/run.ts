@@ -342,6 +342,9 @@ async function runLoop(
     // iteration (a snapshot, not a reducer merge — it already holds the merge).
     Object.assign(state, res.state);
     last = res;
+    // `max` is the cap, not the actual count — an `until` break finishes early
+    // with done < total, which a progress bar reads as simply "done".
+    options.onEvent?.({ type: "node-progress", nodeId: node.id, data: { done: i + 1, total: max } });
     if (until && truthy(evaluate(until, state))) break;
   }
 
@@ -376,6 +379,14 @@ async function runMap(
   let paused: StepOutcome | undefined;
   let failure: Error | undefined;
 
+  // Fan-out progress for hosts (lets a consumer render "3 / 5" instead of a
+  // silent wait); the body's own per-iteration events stay internal.
+  const total = list.length;
+  let done = 0;
+  const emitProgress = (): void =>
+    options.onEvent?.({ type: "node-progress", nodeId: node.id, data: { done, total } });
+  emitProgress();
+
   // A rolling worker pool: each worker pulls the next index until the list is
   // drained, so a slow item never blocks the others (unlike fixed chunks).
   const worker = async (): Promise<void> => {
@@ -395,9 +406,13 @@ async function runMap(
           return;
         }
         results[i] = { kind: "error", error: res.error };
+        done += 1;
+        emitProgress();
         continue;
       }
       results[i] = { kind: "ok", output: res.output, delta: diffState(seed, res.state) };
+      done += 1;
+      emitProgress();
     }
   };
 

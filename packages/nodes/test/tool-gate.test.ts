@@ -41,7 +41,7 @@ function registerReadTool(): void {
   );
 }
 
-function buildFlow(tool: string): Flow {
+function buildFlow(tool: string, extra: Record<string, unknown> = {}): Flow {
   return {
     schemaVersion: SCHEMA_VERSION,
     id: "gate-tool",
@@ -53,7 +53,7 @@ function buildFlow(tool: string): Flow {
       {
         id: "tool",
         type: "tool",
-        config: { tool, args: { name: "x" }, writeTo: "result" },
+        config: { tool, args: { name: "x" }, writeTo: "result", ...extra },
       },
       { id: "out", type: "output", config: { from: "$.result" } },
     ],
@@ -140,5 +140,48 @@ describe("tool node tier gate", () => {
     expect(res.status).toBe("completed");
     expect(approverCalls).toBe(0);
     expect(ran).toEqual([{ name: "list_repos", args: { name: "x" } }]);
+  });
+
+  it("gates a read tool when the node config requires approval", async () => {
+    registerReadTool();
+
+    const res = await runFlow(buildFlow("list_repos", { requiresApproval: true }), {
+      input: {},
+    });
+
+    expect(res.status).toBe("failed");
+    expect(res.error).toContain("was not approved");
+    expect(ran).toEqual([]);
+  });
+
+  it("escalates a read tool to a gated tier set on the node config", async () => {
+    registerReadTool();
+    const requests: ToolApprovalRequest[] = [];
+
+    const res = await runFlow(buildFlow("list_repos", { tier: "dangerous" }), {
+      input: {},
+      onToolApproval: (req) => {
+        requests.push(req);
+        return { approved: true };
+      },
+    });
+
+    expect(res.status).toBe("completed");
+    expect(requests).toEqual([
+      { nodeId: "tool", tool: "list_repos", tier: "dangerous", args: { name: "x" } },
+    ]);
+  });
+
+  it("still gates a dangerous tool when the node config tries to relax it", async () => {
+    registerDangerTool();
+
+    const res = await runFlow(
+      buildFlow("delete_repo", { tier: "read", requiresApproval: false }),
+      { input: {} },
+    );
+
+    expect(res.status).toBe("failed");
+    expect(res.error).toContain("was not approved");
+    expect(ran).toEqual([]);
   });
 });

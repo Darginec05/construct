@@ -11,7 +11,14 @@ import {
   type ModelProvider,
   type ToolSpec,
 } from "@construct/providers";
-import { getTool, needsApproval, runTool, type Tool } from "@construct/tools";
+import {
+  getTool,
+  higherTier,
+  needsApproval,
+  runTool,
+  type Tool,
+  type ToolTier,
+} from "@construct/tools";
 import { getStore } from "@construct/rag";
 
 /**
@@ -516,12 +523,20 @@ async function tool(ctx: ExecutorContext): Promise<ExecutorResult> {
   const impl = resolveToolImpl(ctx, name);
   if (!impl) throw new Error(`tool node: no tool registered as "${name}"`);
   const args = ctx.evaluate(ctx.config.args ?? {});
+  // The node config can ESCALATE — never relax — the tool's intrinsic gating:
+  // a flow author may force approval / a higher tier on a specific call, but a
+  // node setting can't ungate an intrinsically dangerous tool. Stricter wins.
+  const tier = higherTier(ctx.config.tier as ToolTier | undefined, impl.tier);
+  const gate = {
+    tier,
+    requiresApproval: ctx.config.requiresApproval === true || impl.requiresApproval === true,
+  };
   // Gated tools (write/bulk/dangerous or requiresApproval) need explicit human
   // approval. Unlike the agent loop there's no model to recover from a denial,
   // so fail the node — fail safe by denying when no approver is wired.
-  if (needsApproval(impl)) {
+  if (needsApproval(gate)) {
     const decision = ctx.requestApproval
-      ? await ctx.requestApproval({ tool: impl.name, tier: impl.tier, args })
+      ? await ctx.requestApproval({ tool: impl.name, tier, args })
       : { approved: false, reason: "no approver configured" };
     if (!decision.approved) {
       const why = decision.reason ? ` (${decision.reason})` : "";
