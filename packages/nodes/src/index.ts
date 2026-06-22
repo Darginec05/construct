@@ -560,7 +560,7 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
     call && typeof call.arguments.clarification === "string"
       ? call.arguments.clarification
       : "";
-  if (reason) ctx.onDelta(reason);
+  if (reason) ctx.onDelta(reason, "rationale");
 
   // Canonicalize the model's pick to a real branch. When nothing matches —
   // a provider that ignored the forced tool and answered with an off-list label —
