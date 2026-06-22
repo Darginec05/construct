@@ -228,6 +228,28 @@ function resolveTools(ctx: ExecutorContext, names: string[]): ToolSpec[] {
 
 type Budget = { maxTokens?: number; maxSteps?: number; maxUsd?: number };
 
+type HistoryMessage = { role: "user" | "assistant"; content: string };
+
+/**
+ * Coerce an evaluated `history` expression into replayable chat turns. The value
+ * comes from a channel the host fills, so it is a boundary: validate defensively
+ * and drop anything that is not a `{ role: "user" | "assistant", content: string }`
+ * rather than throwing. Prior `tool`/`system` turns are intentionally not
+ * replayed — only the user/assistant transcript.
+ */
+function coerceHistory(value: unknown): HistoryMessage[] {
+  if (!Array.isArray(value)) return [];
+  const out: HistoryMessage[] = [];
+  for (const item of value) {
+    if (item == null || typeof item !== "object") continue;
+    const { role, content } = item as { role?: unknown; content?: unknown };
+    if ((role === "user" || role === "assistant") && typeof content === "string") {
+      out.push({ role, content });
+    }
+  }
+  return out;
+}
+
 /**
  * `agent`: a model call that runs a multi-step tool-use loop. Each turn the
  * model may answer, request tool calls (executed and fed back), or — when an
@@ -272,6 +294,11 @@ async function agent(ctx: ExecutorContext): Promise<ExecutorResult> {
     system = system ? `${system}\n\n${note}` : note;
   }
   if (system) messages.push({ role: "system", content: system });
+  // Prior conversation turns (host-windowed) for a multi-turn session, read from
+  // a channel and replayed before the current prompt so the model has context.
+  if (ctx.config.history != null) {
+    for (const m of coerceHistory(ctx.evaluate(ctx.config.history))) messages.push(m);
+  }
   const prompt = resolvePromptSource(ctx, ctx.config.prompt, "agent");
   messages.push({ role: "user", content: prompt });
 
@@ -533,7 +560,7 @@ async function router(ctx: ExecutorContext): Promise<ExecutorResult> {
     call && typeof call.arguments.clarification === "string"
       ? call.arguments.clarification
       : "";
-  if (reason) ctx.onDelta(reason);
+  if (reason) ctx.onDelta(reason, "rationale");
 
   // Canonicalize the model's pick to a real branch. When nothing matches —
   // a provider that ignored the forced tool and answered with an off-list label —

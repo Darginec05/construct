@@ -7,6 +7,13 @@ export interface RunState {
 
 export type RunStatus = "completed" | "paused" | "failed";
 
+/**
+ * Nature of a streamed `token`: `content` is user-facing answer text, `rationale`
+ * is internal narration (a router's classification reason, future thinking tokens).
+ * A host's lean public stream forwards only `content`; the editor firehose shows both.
+ */
+export type DeltaKind = "content" | "rationale";
+
 export interface RunEvent {
   type:
     | "run-start"
@@ -21,6 +28,8 @@ export interface RunEvent {
     | "node-partial";
   nodeId?: string;
   data?: unknown;
+  /** For `token` events only: whether the chunk is `content` or `rationale`. */
+  kind?: DeltaKind;
 }
 
 /** Token accounting for one model turn, surfaced via `usage` events. */
@@ -184,8 +193,12 @@ export interface ExecutorContext {
    * channels) — used to resolve a prompt ref's declared `vars` inside its body.
    */
   evaluate(expr: unknown, scope?: Record<string, unknown>): unknown;
-  /** Emit a streamed text chunk as a `token` event for the current node. */
-  onDelta(text: string): void;
+  /**
+   * Emit a streamed text chunk as a `token` event for the current node. `kind`
+   * defaults to `content` (user-facing answer); pass `rationale` for internal
+   * narration (e.g. a router's reason) so a lean public stream can drop it.
+   */
+  onDelta(text: string, kind?: DeltaKind): void;
   /** Report token usage for one model turn as a `usage` event. */
   onUsage?: (usage: TokenUsage) => void;
   /**
