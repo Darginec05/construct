@@ -1,16 +1,5 @@
 /**
- * Stress-test reference flows for @construct/sdk.
+ * SDK reference flows — add new entries here as they are written.
  *
- * Run one:  yarn workspace @construct/sdk exec tsx examples/support-hub.ts
- * Validate all: yarn workspace @construct/sdk smoke
+ * Validate: yarn workspace @construct/sdk smoke
  */
-export { supportHub } from "./support-hub.js";
-export { documentIntake } from "./document-intake.js";
-export { incidentResponse } from "./incident-response.js";
-export { salesOutbound } from "./sales-outbound.js";
-export { codeReview } from "./code-review.js";
-export { supervisor } from "./supervisor.js";
-export { contentStudio } from "./content-studio.js";
-export { launchAnnouncement } from "./launch-announcement.js";
-export { cmoStrategist } from "./cmo-strategist.js";
-export { realEstateCrmAgent } from "./real-estate-crm-agent.js";
