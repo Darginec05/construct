@@ -1,15 +1,10 @@
 /**
  * Validates every flow exported from ./index.ts.
- * Succeeds immediately when the catalog is empty.
  */
+import { launchAnnouncement } from "./launch-announcement.js";
 import type { FlowReport } from "./_util.js";
 
-const FLOWS: FlowReport[] = [];
-
-if (FLOWS.length === 0) {
-  console.log("no reference flows to validate");
-  process.exit(0);
-}
+const FLOWS: FlowReport[] = [launchAnnouncement];
 
 let failed = false;
 
@@ -28,4 +23,4 @@ for (const flow of FLOWS) {
 
 if (failed) process.exit(1);
 
-console.log(`\nvalidated ${FLOWS.length} stress flows`);
+console.log(`\nvalidated ${FLOWS.length} reference flow(s)`);
