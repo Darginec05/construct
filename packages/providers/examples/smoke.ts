@@ -19,7 +19,7 @@ async function main(): Promise<void> {
       { role: "user", content: "look up 7" },
     ],
     {
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-haiku-4-5",
       temperature: 0.2,
       tools: [
         {
