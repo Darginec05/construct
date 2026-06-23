@@ -4,3 +4,4 @@
  * Validate: yarn workspace @construct/sdk smoke
  */
 export { launchAnnouncement } from "./launch-announcement.js";
+export { distributionPlanner } from "./distribution-planner.js";

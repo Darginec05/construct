@@ -1,10 +1,11 @@
 /**
  * Validates every flow exported from ./index.ts.
  */
+import { distributionPlanner } from "./distribution-planner.js";
 import { launchAnnouncement } from "./launch-announcement.js";
 import type { FlowReport } from "./_util.js";
 
-const FLOWS: FlowReport[] = [launchAnnouncement];
+const FLOWS: FlowReport[] = [launchAnnouncement, distributionPlanner];
 
 let failed = false;
 
