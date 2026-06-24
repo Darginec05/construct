@@ -614,7 +614,8 @@ async function tool(ctx: ExecutorContext): Promise<ExecutorResult> {
       throw new Error(`tool node: "${impl.name}" was not approved${why}`);
     }
   }
-  const result = await runTool(impl, args);
+  const timeoutMs = typeof ctx.config.timeoutMs === "number" ? ctx.config.timeoutMs : undefined;
+  const result = await runTool(impl, args, { timeoutMs });
   if (!result.ok) throw new Error(`tool node: "${impl.name}" failed: ${result.error}`);
   return patch(ctx.config.writeTo, result.output);
 }

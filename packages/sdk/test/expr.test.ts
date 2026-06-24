@@ -75,4 +75,10 @@ describe("tpl", () => {
     const ch = new ChannelHandle("x", "text", "lastValue");
     expect(tpl`Score ${ch} is ${100}`).toBe("Score {{x}} is 100");
   });
+
+  it("converts read expressions (.$ / .path()) to {{...}} tokens", () => {
+    const ch = new ChannelHandle("outline", "json", "lastValue");
+    expect(tpl`Title: ${ch.path("courseTitle")}`).toBe("Title: {{outline.courseTitle}}");
+    expect(tpl`Whole: ${ch.$}`).toBe("Whole: {{outline}}");
+  });
 });

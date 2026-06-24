@@ -427,6 +427,8 @@ const ToolConfig = z.object({
   requiresApproval: z.boolean().default(false),
   resource: z.string().optional(),
   writeTo: z.string().optional(),
+  /** Override the per-call timeout (ms); falls back to the engine default. */
+  timeoutMs: z.number().int().positive().optional(),
 });
 
 // --- human ------------------------------------------------------------------

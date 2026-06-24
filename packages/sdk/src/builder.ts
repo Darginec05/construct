@@ -145,6 +145,8 @@ export interface ToolOpts extends NodeId {
   requiresApproval?: boolean;
   resource?: ResourceHandle | string;
   writeTo?: ChannelHandle | string;
+  /** Override the per-call timeout (ms); falls back to the engine default. */
+  timeoutMs?: number;
 }
 
 export interface HumanOpts extends NodeId {
@@ -315,6 +317,7 @@ abstract class Connector {
       requiresApproval: opts.requiresApproval ?? impl.requiresApproval,
       resource: toResource(opts.resource),
       writeTo: toChannel(opts.writeTo),
+      timeoutMs: opts.timeoutMs,
     }));
   }
 

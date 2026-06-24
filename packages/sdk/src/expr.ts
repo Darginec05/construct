@@ -101,9 +101,17 @@ export function toResource(value: ResourceHandle | string | undefined): string |
 }
 
 /**
- * Build a prompt template, substituting each interpolated channel handle as a
- * `{{name}}` token. `f.tpl\`Critique ${shot} against ${tokens}\`` yields
- * `"Critique {{shot}} against {{tokens}}"`. Plain values are stringified as-is.
+ * Build a prompt template, substituting each interpolated value as a `{{...}}`
+ * token the engine resolves against run state:
+ *   - a {@link ChannelHandle}        -> `{{name}}`
+ *   - a read expression (`.$`/`.path()` → `$.name.key`) -> `{{name.key}}`
+ *   - any other value                -> stringified as-is
+ * `f.tpl\`Critique ${shot} against ${tokens}\`` yields
+ * `"Critique {{shot}} against {{tokens}}"`. The read-expression case matters
+ * because `.path()` returns `$.name.key` (the right form for `args`/`over`/
+ * conditions, which the engine reads directly) — but inside a template only
+ * `{{...}}` tokens are interpolated, so a bare `$.name.key` would otherwise
+ * reach the model as literal text.
  */
 export function tpl(
   strings: TemplateStringsArray,
@@ -112,10 +120,17 @@ export function tpl(
   let out = "";
   strings.forEach((chunk, i) => {
     out += chunk;
-    if (i < values.length) {
-      const v = values[i];
-      out += isChannel(v) ? `{{${v.name}}}` : String(v);
-    }
+    const value = values[i];
+    if (value !== undefined) out += toToken(value);
   });
   return out;
+}
+
+/** Map an interpolated template value to its `{{...}}` token (or literal text). */
+function toToken(value: ChannelHandle | ExprInput): string {
+  if (isChannel(value)) return `{{${value.name}}}`;
+  if (typeof value === "string" && value.startsWith("$.")) {
+    return `{{${value.slice(2)}}}`;
+  }
+  return String(value);
 }
