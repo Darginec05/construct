@@ -1,6 +1,6 @@
 {
   "name": "@construct/nodes",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": [
@@ -27,11 +27,11 @@
     "clean": "rm -rf dist examples-dist .turbo"
   },
   "dependencies": {
-    "@construct/dsl": "^0.0.0",
-    "@construct/engine": "^0.0.0",
-    "@construct/providers": "^0.0.0",
-    "@construct/rag": "^0.0.0",
-    "@construct/tools": "^0.0.0"
+    "@construct/dsl": "^0.1.0",
+    "@construct/engine": "^0.1.0",
+    "@construct/providers": "^0.1.0",
+    "@construct/rag": "^0.1.0",
+    "@construct/tools": "^0.1.0"
   },
   "devDependencies": {
     "@construct/mcp": "*",

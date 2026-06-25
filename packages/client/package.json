@@ -1,6 +1,6 @@
 {
   "name": "@construct/client",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -21,7 +21,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@construct/dsl": "^0.0.0"
+    "@construct/dsl": "^0.1.0"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

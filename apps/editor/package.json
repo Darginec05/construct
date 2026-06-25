@@ -1,6 +1,6 @@
 {
   "name": "@construct/playground",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -12,8 +12,8 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@construct/client": "^0.0.0",
-    "@construct/editor": "^0.0.0",
+    "@construct/client": "^0.1.0",
+    "@construct/editor": "^0.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
