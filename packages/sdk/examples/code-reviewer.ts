@@ -32,7 +32,7 @@ const CodeReviewSchema = z.object({
 });
 
 export const codeReviewer = defineFlow("code-reviewer", "Code reviewer", (f) => {
-  const codeInput = f.text("code-input");
+  const code = f.text("code");
   const language = f.text("language");
   const reviewOutput = f.json("review-output", CodeReviewSchema);
 
@@ -43,22 +43,21 @@ export const codeReviewer = defineFlow("code-reviewer", "Code reviewer", (f) => 
       summary: reviewOutput.path("summary"),
       strengths: reviewOutput.path("strengths"),
       findings: reviewOutput.path("findings"),
-      originalCode: codeInput.$,
       fixedCode: reviewOutput.path("fixedCode"),
     },
     { label: "Review" },
   );
 
-  f.input({ schema: { code: codeInput, language }, label: "Code snippet" })
+  f.input({ schema: { code, language }, label: "Code snippet" })
     .agent({
       label: "Code reviewer",
       description: "Review the snippet and return structured findings.",
-      model: anthropic("claude-haiku-4-5"),
+      model: anthropic("claude-haiku-4-5", { maxTokens: 8192 }),
       output: CodeReviewSchema,
       prompt: f.tpl`Review this code${language}. Focus on correctness, security, and clarity. Be concise.
 
 Code:
-${codeInput}
+${code}
 
 Return:
 - pass: true only if you would approve as-is (no critical/major issues)
